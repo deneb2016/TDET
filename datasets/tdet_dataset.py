@@ -1,34 +1,56 @@
-# --------------------------------------------------------
-# PyTorch WSDDN
-# Licensed under The MIT License [see LICENSE for details]
-# Written by Seungkwan Lee
-# Some parts of this implementation are based on code from Ross Girshick, Jiasen Lu, and Jianwei Yang
-# --------------------------------------------------------
 import torch.utils.data as data
 import torch
-
+from scipy.io import loadmat
 from scipy.misc import imread
 import numpy as np
 import cv2
 from datasets.voc_loader import VOCLoader
+from datasets.coco_loader import COCOLoader
 
 
-class WSDDNDataset(data.Dataset):
-    def __init__(self, dataset_names, data_dir, prop_method, num_classes=20, min_prop_scale=20):
+class TDETDataset(data.Dataset):
+    def __init__(self, dataset_names, data_dir, prop_method, num_classes=20, prop_min_scale=10, prop_topk=2000):
         self._dataset_loaders = []
         self.num_classes = num_classes
+        self.prop_min_scale = prop_min_scale
+        self.prop_topk = prop_topk
+        self.prop_method = prop_method
         for name in dataset_names:
             if name == 'voc07_trainval':
-                self._dataset_loaders.append(VOCLoader(data_dir, prop_method, min_prop_scale, '2007', 'trainval'))
+                self._dataset_loaders.append(VOCLoader(data_dir, prop_method, '2007', 'trainval'))
             elif name == 'voc07_test':
-                self._dataset_loaders.append(VOCLoader(data_dir, prop_method, min_prop_scale, '2007', 'test'))
+                self._dataset_loaders.append(VOCLoader(data_dir, prop_method, '2007', 'test'))
+            elif name == 'coco60_train2014':
+                self._dataset_loaders.append(COCOLoader(data_dir, 'coco60_train2014', prop_method))
+            elif name == 'coco60_val2014':
+                self._dataset_loaders.append(COCOLoader(data_dir, 'coco60_val2014', prop_method))
             else:
                 raise Exception('Undefined dataset %s' % name)
 
-    def get_data(self, index, h_flip=False, target_im_size=688, min_resize=False):
+    def unique_boxes(self, boxes, scale=1.0):
+        """Return indices of unique boxes."""
+        v = np.array([1, 1e3, 1e6, 1e9])
+        hashes = np.round(boxes * scale).dot(v)
+        _, index = np.unique(hashes, return_index=True)
+        return np.sort(index)
+
+    def select_proposals(self, proposals, scores):
+        keep = self.unique_boxes(proposals)
+        proposals = proposals[keep]
+        scores = scores[keep]
+        w = proposals[:, 2] - proposals[:, 0] + 1
+        h = proposals[:, 3] - proposals[:, 1] + 1
+        keep = np.nonzero((w >= self.prop_min_scale) * (h >= self.prop_min_scale))[0]
+        proposals = proposals[keep]
+        scores = scores[keep]
+        order = np.argsort(-scores)
+        order = order[:min(self.prop_topk, order.shape[0])]
+        return proposals[order], scores[order]
+
+    def get_data(self, index, h_flip=False, target_im_size=688):
         im, gt_boxes, gt_categories, proposals, prop_scores, id, loader_index = self.get_raw_data(index)
         raw_img = im.copy()
-
+        proposals, prop_scores = self.select_proposals(proposals, prop_scores)
         # rgb -> bgr
         im = im[:, :, ::-1]
 
@@ -56,10 +78,7 @@ class WSDDNDataset(data.Dataset):
         im_size_min = np.min(im_shape[0:2])
         im_size_max = np.max(im_shape[0:2])
 
-        if min_resize:
-            im_scale = target_im_size / float(im_size_min)
-        else:
-            im_scale = target_im_size / float(im_size_max)
+        im_scale = target_im_size / float(im_size_min)
 
         if im_size_max * im_scale > 2000:
             im_scale = 2000 / im_size_max
@@ -79,7 +98,15 @@ class WSDDNDataset(data.Dataset):
         image_level_label = torch.zeros(self.num_classes, dtype=torch.uint8)
         for label in gt_categories:
             image_level_label[label] = 1
-        return data, gt_boxes, gt_categories, proposals, prop_scores, image_level_label, im_scale, raw_img, id
+        return {'im_data': data,
+                'gt_boxes': gt_boxes,
+                'gt_labels': gt_categories,
+                'proposals': proposals,
+                'prop_scores': prop_scores,
+                'image_level_label': image_level_label,
+                'im_scale': im_scale,
+                'raw_img': raw_img,
+                'id': id}
 
     def get_raw_proposal(self, index):
         here = None
@@ -94,7 +121,14 @@ class WSDDNDataset(data.Dataset):
                 index -= len(loader)
                 loader_index += 1
 
-        proposals = here['proposals'].copy()
+        assert here is not None
+        raw_prop = loadmat(here['prop_path'])
+        proposals = raw_prop['boxes'].astype(np.float32)
+        prop_scores = raw_prop['scores'][:, 0].astype(np.float32)
+        if self.prop_method == 'ss':
+            prop_scores = -prop_scores
+
+        proposals, prop_scores = self.select_proposals(proposals, prop_scores)
         return proposals
 
     def get_raw_data(self, index):
@@ -120,8 +154,11 @@ class WSDDNDataset(data.Dataset):
 
         gt_boxes = here['boxes'].copy()
         gt_categories = here['categories'].copy()
-        proposals = here['proposals'].copy()
-        prop_scores = here['prop_scores'].copy()
+        raw_prop = loadmat(here['prop_path'])
+        proposals = raw_prop['boxes'].astype(np.float32)
+        prop_scores = raw_prop['scores'][:, 0].astype(np.float32)
+        if self.prop_method == 'ss':
+            prop_scores = -prop_scores
         id = here['id']
         return im, gt_boxes, gt_categories, proposals, prop_scores, id, loader_index
 

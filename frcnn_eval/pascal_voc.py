@@ -4,7 +4,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ross Girshick
 #
-# Modified by Seungkwan Lee for WSDDN
+# Modified by Seungkwan Lee
 # --------------------------------------------------------
 
 import os
@@ -29,8 +29,6 @@ class voc_eval_kit(imdb):
         self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index()
         self._salt = str(uuid.uuid4())
-
-
         assert os.path.exists(self._devkit_path), 'VOCdevkit path does not exist: {}'.format(self._devkit_path)
         assert os.path.exists(self._data_path), 'Path does not exist: {}'.format(self._data_path)
 

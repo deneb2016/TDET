@@ -1,1 +1,1 @@
-# WSDDN.pytorch
+# Transferable detector

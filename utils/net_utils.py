@@ -1,10 +1,3 @@
-# --------------------------------------------------------
-# PyTorch WSDDN
-# Copyright 2018. Seungkwan Lee
-# Licensed under The MIT License [see LICENSE for details]
-# Written by Seungkwan Lee
-# Some parts of this implementation are based on code from Ross Girshick, Jiasen Lu, and Jianwei Yang
-# --------------------------------------------------------
 import torch
 import numpy as np
 
@@ -21,6 +14,17 @@ def clip_gradient(model, clip_norm):
     for p in model.parameters():
         if p.requires_grad and p.grad is not None:
             p.grad.mul_(norm)
+    return totalnorm
+
+
+def calc_grad_norm(model):
+    totalnorm = 0
+    for p in model.parameters():
+        if p.requires_grad and p.grad is not None:
+            modulenorm = p.grad.data.norm().item()
+            totalnorm = totalnorm + modulenorm ** 2
+    totalnorm = np.sqrt(totalnorm)
+    return totalnorm
 
 
 def adjust_learning_rate(optimizer, decay=0.1):

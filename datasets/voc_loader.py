@@ -1,9 +1,3 @@
-# --------------------------------------------------------
-# PyTorch WSDDN
-# Licensed under The MIT License [see LICENSE for details]
-# Written by Seungkwan Lee
-# Some parts of this implementation are based on code from Ross Girshick, Jiasen Lu, and Jianwei Yang
-# --------------------------------------------------------
 from scipy.misc import imread
 from scipy.io import loadmat
 import numpy as np
@@ -20,38 +14,19 @@ VOC_CLASSES = [
 
 
 class VOCLoader:
-    def __init__(self, root, prop_method, min_prop_scale, year, name):
+    def __init__(self, root, prop_method, year, name):
         self.items = []
         self.name_to_index = dict(zip(VOC_CLASSES, range(len(VOC_CLASSES))))
         print('VOC %s %s dataset loading...' % (year, name))
 
-        proposals = {}
-        prop_scores = {}
-        if prop_method == 'eb':
-            raw_data = loadmat(os.path.join(root, 'proposals', 'edge_boxes_voc_%s_%s.mat' % (year, name)))
-            for i in range(len(raw_data['images'][0])):
-                id = raw_data['images'][0][i][0]
-                boxes = raw_data['boxes'][0][i].astype(np.float) - 1
-                scores = raw_data['boxScores'][0][i][:, 0]
-                is_good = (boxes[:, 2] >= boxes[:, 0] + min_prop_scale) * (boxes[:, 3] >= boxes[:, 1] + min_prop_scale)
-                is_good = np.nonzero(is_good)[0]
-                boxes = boxes[is_good]
-                scores = scores[is_good]
-                proposals[id] = np.concatenate([boxes[:, 1:2], boxes[:, 0:1], boxes[:, 3:4], boxes[:, 2:3]], 1)
-                prop_scores[id] = scores
-
-        elif prop_method == 'ss':
-            raw_data = loadmat(os.path.join(root, 'proposals', 'selective_search_voc_%s_%s.mat' % (year, name)))
-            for i in range(len(raw_data['images'])):
-                id = raw_data['images'][i][0][0]
-                boxes = raw_data['boxes'][0][i].astype(np.float) - 1
-                scores = np.zeros(len(boxes))
-                is_good = (boxes[:, 2] >= boxes[:, 0] + min_prop_scale) * (boxes[:, 3] >= boxes[:, 1] + min_prop_scale)
-                is_good = np.nonzero(is_good)[0]
-                boxes = boxes[is_good]
-                scores = scores[is_good]
-                proposals[id] = np.concatenate([boxes[:, 1:2], boxes[:, 0:1], boxes[:, 3:4], boxes[:, 2:3]], 1)
-                prop_scores[id] = scores
+        if prop_method == 'ss':
+            prop_dir = os.path.join(root, 'voc07_proposals', 'selective_search')
+        elif prop_method == 'eb':
+            prop_dir = os.path.join(root, 'voc07_proposals', 'edge_boxes_70')
+        elif prop_method == 'mcg':
+            prop_dir = os.path.join(root, 'voc07_proposals', 'MCG2015')
+        else:
+            raise Exception('Undefined proposal name')
 
         rootpath = os.path.join(root, 'VOCdevkit2007', 'VOC' + year)
         for line in open(os.path.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
@@ -78,8 +53,7 @@ class VOCLoader:
             data['boxes'] = np.array(box_set)
             data['categories'] = np.array(category_set, np.long)
             data['img_path'] = os.path.join(rootpath, 'JPEGImages', line.strip() + '.jpg')
-            data['proposals'] = proposals[id]
-            data['prop_scores'] = prop_scores[id]
+            data['prop_path'] = os.path.join(prop_dir, 'mat', id[:4], '%s.mat' % id)
             self.items.append(data)
 
         print('VOC %s %s dataset loading complete' % (year, name))

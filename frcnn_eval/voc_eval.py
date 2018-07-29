@@ -3,7 +3,7 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Bharath Hariharan
 #
-# Modified by Seungkwan Lee for WSDDN
+# Modified by Seungkwan Lee
 # --------------------------------------------------------
 
 import xml.etree.ElementTree as ET
@@ -145,7 +145,6 @@ def voc_eval(detpath,
     image_ids = [x[0] for x in splitlines]
     confidence = np.array([float(x[1]) for x in splitlines])
     BB = np.array([[float(z) for z in x[2:]] for x in splitlines])
-    print(BB, '@@@',confidence)
     # sort by confidence
     sorted_ind = np.argsort(-confidence)
     sorted_scores = np.sort(-confidence)
