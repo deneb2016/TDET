@@ -9,12 +9,12 @@ import copy
 
 
 class TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, share_level=2, mil_method='avg'):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, share_level=2, mil_topk=1):
         super(TDET_VGG16, self).__init__()
         assert 0 <= share_level <= 2
         self.num_classes = num_class
         self.cls_specific_det = cls_specific_det
-        self.mil_method = mil_method
+        self.mil_topk = mil_topk
         vgg = torchvision.models.vgg16()
         if pretrained_model_path is None:
             print("Create WSDDN_VGG16 without pretrained weights")
@@ -103,12 +103,8 @@ class TDET_VGG16(nn.Module):
         if image_level_label is None:
             return scores
 
-        if self.mil_method == 'avg':
-            image_level_scores = torch.mean(scores, 0)
-        elif self.mil_method == 'max':
-            image_level_scores, _ = torch.max(scores, 0)
-        else:
-            raise Exception('Undefined mil method')
+        image_level_scores, _ = torch.topk(scores, self.mil_topk, dim=0)
+        image_level_scores = torch.mean(scores, 0)
 
         loss = F.binary_cross_entropy(image_level_scores, image_level_label.to(torch.float32))
 

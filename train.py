@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument('--pooling_method', help='roi_pooling or roi_align', default='roi_pooling', type=str)
     parser.add_argument('--cls_specific', help='cls specific detection', action='store_true')
     parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
-    parser.add_argument('--mil_method', help='avg or max', default='avg', type=str)
+    parser.add_argument('--mil_topk', default=1, type=int)
 
     parser.add_argument('--prop_method', help='ss, eb, or mcg', default='eb', type=str)
     parser.add_argument('--prop_min_scale', help='minimum proposal box size', default=20, type=int)
@@ -87,7 +87,7 @@ def train():
     lr = args.lr
 
     if args.net == 'TDET_VGG16':
-        model = TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20, args.pooling_method, args.cls_specific, args.share_level, args.mil_method)
+        model = TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20, args.pooling_method, args.cls_specific, args.share_level, args.mil_topk)
     else:
         raise Exception('network is not defined')
 

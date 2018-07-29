@@ -176,7 +176,7 @@ def eval_saved_result():
         save_name = os.path.join(args.save_dir, 'detection_result', '{}_multiscale.pkl'.format(args.model_name))
     else:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}.pkl'.format(args.model_name))
-        
+
     all_boxes = pickle.load(open(save_name, 'rb'), encoding='latin1')
 
     for cls in range(20):
