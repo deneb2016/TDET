@@ -104,7 +104,7 @@ class TDET_VGG16(nn.Module):
             return scores
 
         image_level_scores, _ = torch.topk(scores, self.mil_topk, dim=0)
-        image_level_scores = torch.mean(scores, 0)
+        image_level_scores = torch.mean(image_level_scores, 0)
 
         loss = F.binary_cross_entropy(image_level_scores, image_level_label.to(torch.float32))
 
