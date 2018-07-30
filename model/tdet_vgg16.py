@@ -9,11 +9,12 @@ import copy
 
 
 class TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, share_level=2, mil_topk=1):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, backprop2det=False, share_level=2, mil_topk=1):
         super(TDET_VGG16, self).__init__()
         assert 0 <= share_level <= 2
         self.num_classes = num_class
         self.cls_specific_det = cls_specific_det
+        self.backprop2det = backprop2det
         self.mil_topk = mil_topk
         vgg = torchvision.models.vgg16()
         if pretrained_model_path is None:
@@ -95,7 +96,7 @@ class TDET_VGG16(nn.Module):
         cls_score = F.softmax(cls_score, dim=1)
         det_score = F.sigmoid(det_score)
 
-        if self.cls_specific_det:
+        if self.backprop2det:
             scores = cls_score * det_score
         else:
             scores = cls_score * det_score.detach()
