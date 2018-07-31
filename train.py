@@ -191,9 +191,10 @@ def train():
             target_prop_sum = 0
             start = time.time()
 
-            choice_weight = repr(F.softmax(model.choice_layer.weight.clone(), 0))
-            print(choice_weight)
-            log_file.write(choice_weight + '\n')
+            if args.det_choice > 1:
+                choice_weight = repr(F.softmax(model.choice_layer.weight.clone(), 0))
+                print(choice_weight)
+                log_file.write(choice_weight + '\n')
 
         if step in (args.max_iter * 4 // 7, args.max_iter * 6 // 7):
             adjust_learning_rate(optimizer, 0.1)

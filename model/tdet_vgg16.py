@@ -180,7 +180,7 @@ class TDET_VGG16(nn.Module):
                     lr = lr * 2
                     weight_decay = 0
                 if 'choice_layer' in key:
-                    lr = 0.1
+                    lr = 1.0
                     weight_decay = 0
                 params += [{'params': [value], 'lr': lr, 'weight_decay': weight_decay}]
 
