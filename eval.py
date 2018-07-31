@@ -68,7 +68,7 @@ def eval():
     checkpoint = torch.load(load_name)
     if checkpoint['net'] == 'TDET_VGG16':
         model = TDET_VGG16(None, 20, pooling_method=checkpoint['pooling_method'],
-                           cls_specific_det=checkpoint['cls_specific'], share_level=checkpoint['share_level'], det_softmax=checkpoint['det_softmax'])
+                           cls_specific_det=checkpoint['cls_specific'], share_level=checkpoint['share_level'], det_softmax=checkpoint['det_softmax'] if 'det_softmax' in checkpoint else 'no')
     else:
         raise Exception('network is not defined')
     model.load_state_dict(checkpoint['model'])
@@ -217,10 +217,7 @@ def eval_saved_result():
     eval_kit.evaluate_detections(all_boxes)
 
 
-
 def show():
-    eval_kit = voc_eval_kit('test', '2007', os.path.join(args.data_dir, 'VOCdevkit2007'))
-
     test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
                                num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
 
@@ -234,7 +231,7 @@ def show():
     cls_scores = saved_data['cls']
     det_scores = saved_data['det']
 
-    for cls in range(10, 20):
+    for cls in range(1, 20):
         for index in range(len(all_boxes[0])):
             dets = all_boxes[cls][index]
             if dets == [] or len(dets) == 0:
@@ -257,9 +254,8 @@ def show():
                 draw_box(all_boxes[cls][index][3:4, :4], 'blue')
                 draw_box(all_boxes[cls][index][4:5, :4], 'yellow')
                 plt.show()
-    eval_kit.evaluate_detections(all_boxes)
-
 
 if __name__ == '__main__':
     eval()
     #eval_saved_result()
+    #show()

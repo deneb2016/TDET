@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--data_dir', help='directory to load data', default='../data', type=str)
 
     parser.add_argument('--pooling_method', help='roi_pooling or roi_align', default='roi_pooling', type=str)
-    parser.add_argument('--cls_specific', help='cls specific detection', action='store_true')
+    parser.add_argument('--cls_specific', help='avg, ind, or no', type=str, default='no')
     parser.add_argument('--backprop2det', help='whether or not backprop from score to det', action='store_true')
     parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
     parser.add_argument('--mil_topk', default=1, type=int)
@@ -95,15 +95,7 @@ def train():
     else:
         raise Exception('network is not defined')
 
-    params = []
-    for key, value in dict(model.named_parameters()).items():
-        if value.requires_grad:
-            if 'bias' in key:
-                params += [{'params': [value], 'lr': lr * 2, 'weight_decay': 0}]
-            else:
-                params += [{'params': [value], 'lr': lr, 'weight_decay': 0.0005}]
-
-    optimizer = torch.optim.SGD(params, momentum=0.9)
+    optimizer = model.get_optimizer(args.lr)
 
     if args.resume:
         load_name = os.path.join(output_dir, '{}_{}_{}.pth'.format(args.net, args.checksession, args.checkiter))

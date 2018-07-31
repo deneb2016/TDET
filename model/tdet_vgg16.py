@@ -9,8 +9,10 @@ import copy
 
 
 class TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, backprop2det=False, share_level=2, mil_topk=1, det_softmax='no'):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det='no', backprop2det=False, share_level=2, mil_topk=1, det_softmax='no'):
         super(TDET_VGG16, self).__init__()
+        assert det_softmax in ('no', 'before', 'after')
+        assert cls_specific_det in ('no', 'ind', 'avg')
         assert 0 <= share_level <= 2
         self.num_classes = num_class
         self.cls_specific_det = cls_specific_det
@@ -53,7 +55,7 @@ class TDET_VGG16(nn.Module):
             det.append(nn.ReLU(True))
 
         cls.append(nn.Linear(4096, self.num_classes))
-        if cls_specific_det:
+        if cls_specific_det != 'no':
             det.append(nn.Linear(4096, self.num_classes))
         else:
             det.append(nn.Linear(4096, 1))
@@ -68,6 +70,7 @@ class TDET_VGG16(nn.Module):
         else:
             raise Exception('Undefined pooling method')
 
+        # layer 추가할거면, get_optimizer도 수정해야댐
         self._init_weights()
 
     def _init_weights(self):
@@ -127,14 +130,45 @@ class TDET_VGG16(nn.Module):
 
         return scores, loss
 
+    # def forward_det_only(self, im_data, rois, gt_labels=None):
+    #     shared_feat = self.forward_shared_feat(im_data, rois)
+    #     det_score = self.det_layer(shared_feat)
+    #     det_score = F.sigmoid(det_score)
+    #
+    #     if self.cls_specific_det:
+    #         det_score = torch.mean(det_score, 1)
+    #
+    #     det_score = det_score.view(rois.size(0))
+    #     loss = F.binary_cross_entropy(det_score, gt_labels.to(torch.float32))
+    #     return loss
+
     def forward_det_only(self, im_data, rois, gt_labels=None):
+        N = rois.size(0)
         shared_feat = self.forward_shared_feat(im_data, rois)
         det_score = self.det_layer(shared_feat)
         det_score = F.sigmoid(det_score)
 
-        if self.cls_specific_det:
+        if self.cls_specific_det == 'ind':
+            gt_labels = gt_labels.view(N, 1).expand(N, self.num_classes)
+        elif self.cls_specific_det == 'avg':
             det_score = torch.mean(det_score, 1)
 
-        det_score = det_score.view(rois.size(0))
+        det_score = det_score.view(gt_labels.size())
         loss = F.binary_cross_entropy(det_score, gt_labels.to(torch.float32))
         return loss
+
+    def get_optimizer(self, init_lr):
+        params = []
+        for key, value in dict(self.named_parameters()).items():
+            if value.requires_grad:
+                lr = init_lr
+                weight_decay = 0.0005
+                if 'det_layer' in key and self.cls_specific_det != 'no':
+                    lr = lr * self.num_classes
+                if 'bias' in key:
+                    lr = lr * 2
+                    weight_decay = 0
+                params += [{'params': [value], 'lr': lr, 'weight_decay': weight_decay}]
+
+        optimizer = torch.optim.SGD(params, momentum=0.9)
+        return optimizer
