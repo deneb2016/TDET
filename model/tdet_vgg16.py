@@ -6,19 +6,26 @@ from model.roi_pooling.modules.roi_pool import _RoIPooling
 from utils.box_utils import *
 import torchvision
 import copy
+from model.choice_det_layer import ChoiceDetLayer
 
 
 class TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det='no', backprop2det=False, share_level=2, mil_topk=1, det_softmax='no'):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det='no', backprop2det=False, share_level=2, mil_topk=1, det_softmax='no', det_choice=1):
         super(TDET_VGG16, self).__init__()
         assert det_softmax in ('no', 'before', 'after')
         assert cls_specific_det in ('no', 'ind', 'avg')
+        assert det_choice >= 1
+        assert cls_specific_det != 'no' or det_choice == 1
         assert 0 <= share_level <= 2
         self.num_classes = num_class
         self.cls_specific_det = cls_specific_det
         self.backprop2det = backprop2det
         self.mil_topk = mil_topk
         self.det_softmax = det_softmax
+        if det_choice > 1:
+            self.choice_layer = ChoiceDetLayer(K=det_choice, C=num_class)
+        else:
+            self.choice_layer = None
         vgg = torchvision.models.vgg16()
         if pretrained_model_path is None:
             print("Create WSDDN_VGG16 without pretrained weights")
@@ -55,10 +62,12 @@ class TDET_VGG16(nn.Module):
             det.append(nn.ReLU(True))
 
         cls.append(nn.Linear(4096, self.num_classes))
-        if cls_specific_det != 'no':
-            det.append(nn.Linear(4096, self.num_classes))
-        else:
+        if cls_specific_det == 'no':
             det.append(nn.Linear(4096, 1))
+        elif det_choice > 1:
+            det.append(nn.Linear(4096, det_choice))
+        else:
+            det.append(nn.Linear(4096, self.num_classes))
 
         self.cls_layer = nn.Sequential(*cls)
         self.det_layer = nn.Sequential(*det)
@@ -109,10 +118,12 @@ class TDET_VGG16(nn.Module):
         else:
             raise Exception('Undefined det_softmax option')
 
-        if self.backprop2det:
-            scores = cls_score * det_score
-        else:
-            scores = cls_score * det_score.detach()
+        if not self.backprop2det:
+            det_score = det_score.detach()
+
+        if self.choice_layer is not None:
+            det_score = self.choice_layer(det_score)
+        scores = cls_score * det_score
 
         if image_level_label is None:
             return scores, cls_score, det_score
@@ -149,7 +160,7 @@ class TDET_VGG16(nn.Module):
         det_score = F.sigmoid(det_score)
 
         if self.cls_specific_det == 'ind':
-            gt_labels = gt_labels.view(N, 1).expand(N, self.num_classes)
+            gt_labels = gt_labels.view(N, 1).expand(det_score.size())
         elif self.cls_specific_det == 'avg':
             det_score = torch.mean(det_score, 1)
 
@@ -167,6 +178,9 @@ class TDET_VGG16(nn.Module):
                     lr = lr * self.num_classes
                 if 'bias' in key:
                     lr = lr * 2
+                    weight_decay = 0
+                if 'choice_layer' in key:
+                    lr = 0.1
                     weight_decay = 0
                 params += [{'params': [value], 'lr': lr, 'weight_decay': weight_decay}]
 
