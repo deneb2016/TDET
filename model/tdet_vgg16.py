@@ -115,7 +115,11 @@ class TDET_VGG16(nn.Module):
             return scores, cls_score, det_score
 
         image_level_scores, _ = torch.topk(scores, min(self.mil_topk, rois.size(0)), dim=0)
-        image_level_scores = torch.mean(image_level_scores, 0)
+
+        if self.det_softmax == 'no':
+            image_level_scores = torch.mean(image_level_scores, 0)
+        else:
+            image_level_scores = torch.sum(image_level_scores, 0)
 
         # to avoid numerical error
         image_level_scores = torch.clamp(image_level_scores, min=0, max=1)

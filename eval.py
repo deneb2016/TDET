@@ -198,9 +198,6 @@ def eval():
 def eval_saved_result():
     eval_kit = voc_eval_kit('test', '2007', os.path.join(args.data_dir, 'VOCdevkit2007'))
 
-    test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
-                               num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
-
     if args.multiscale:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}_multiscale.pkl'.format(args.model_name))
     else:
