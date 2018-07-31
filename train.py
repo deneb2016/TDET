@@ -88,7 +88,9 @@ def train():
     lr = args.lr
 
     if args.net == 'TDET_VGG16':
-        model = TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20, args.pooling_method, args.cls_specific, args.backprop2det, args.share_level, args.mil_topk)
+        model = TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20,
+                           pooling_method=args.pooling_method, cls_specific_det=args.cls_specific,
+                           backprop2det=args.backprop2det, share_level=args.share_level, mil_topk=args.mil_topk)
     else:
         raise Exception('network is not defined')
 
