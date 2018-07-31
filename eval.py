@@ -95,9 +95,14 @@ def eval():
     #    all_boxes[cls][image] = N x 5 array of detections in
     #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in range(num_images)] for _ in range(20)]
+    cls_scores_set = [[[] for _ in range(num_images)] for _ in range(20)]
+    det_scores_set = [[[] for _ in range(num_images)] for _ in range(20)]
 
     for index in range(len(test_dataset)):
         scores = 0
+        c_scores = 0
+        d_scores = 0
+        N = 0
         if args.multiscale:
             comb = itertools.product([False, True], [480, 576, 688, 864, 1200])
         else:
@@ -108,18 +113,34 @@ def eval():
             im_data = test_batch['im_data'].unsqueeze(0).to(device)
             proposals = test_batch['proposals'].to(device)
 
-            local_scores = model(im_data, proposals).detach().cpu().numpy()
+            local_scores, local_cls_scores, local_det_scores = model(im_data, proposals)
+            local_scores = local_scores.detach().cpu().numpy()
+            local_cls_scores = local_cls_scores.detach().cpu().numpy()
+            local_det_scores = local_det_scores.detach().cpu().numpy()
             scores = scores + local_scores
+            c_scores = c_scores + local_cls_scores
+            d_scores = d_scores + local_det_scores
+            N += 1
+        scores = 100 * scores / N
+        c_scores = 10 * c_scores / N
+        d_scores = 10 * d_scores / N
 
-        scores = scores * 100
         boxes = test_dataset.get_raw_proposal(index)
 
         for cls in range(20):
             inds = np.where((scores[:, cls] > thresh[cls]))[0]
             cls_scores = scores[inds, cls]
+            cls_c_scores = c_scores[inds, cls]
+            if checkpoint['cls_specific']:
+                cls_d_scores = d_scores[inds, cls]
+            else:
+                cls_d_scores = d_scores[inds, 0]
             cls_boxes = boxes[inds].copy()
+
             top_inds = np.argsort(-cls_scores)[:max_per_image]
             cls_scores = cls_scores[top_inds]
+            cls_c_scores = cls_c_scores[top_inds]
+            cls_d_scores = cls_d_scores[top_inds]
             cls_boxes = cls_boxes[top_inds, :]
 
             # if cls_scores[0] > 10:
@@ -140,6 +161,8 @@ def eval():
                 thresh[cls] = top_scores[cls][0]
 
             all_boxes[cls][index] = np.hstack((cls_boxes, cls_scores[:, np.newaxis])).astype(np.float32, copy=False)
+            cls_scores_set[cls][index] = cls_c_scores
+            det_scores_set[cls][index] = cls_d_scores
 
         if index % 100 == 99:
            print('%d images complete, elapsed time:%.1f' % (index + 1, time.time() - start))
@@ -148,12 +171,14 @@ def eval():
         for i in range(len(test_dataset)):
             inds = np.where(all_boxes[j][i][:, -1] > thresh[j])[0]
             all_boxes[j][i] = all_boxes[j][i][inds, :]
+            cls_scores_set[j][i] = cls_scores_set[j][i][inds]
+            det_scores_set[j][i] = det_scores_set[j][i][inds]
 
     if args.multiscale:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}_multiscale.pkl'.format(args.model_name))
     else:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}.pkl'.format(args.model_name))
-    pickle.dump(all_boxes, open(save_name, 'wb'))
+    pickle.dump({'all_boxes': all_boxes, 'cls': cls_scores_set, 'det': det_scores_set}, open(save_name, 'wb'))
 
     print('Detection Complete, elapsed time: %.1f', time.time() - start)
 
@@ -172,17 +197,21 @@ def eval():
 def eval_saved_result():
     eval_kit = voc_eval_kit('test', '2007', os.path.join(args.data_dir, 'VOCdevkit2007'))
 
+    test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
+                               num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
+
     if args.multiscale:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}_multiscale.pkl'.format(args.model_name))
     else:
         save_name = os.path.join(args.save_dir, 'detection_result', '{}.pkl'.format(args.model_name))
 
-    all_boxes = pickle.load(open(save_name, 'rb'), encoding='latin1')
+    saved_data = pickle.load(open(save_name, 'rb'), encoding='latin1')
+    all_boxes = saved_data['all_boxes']
 
     for cls in range(20):
         for index in range(len(all_boxes[0])):
             dets = all_boxes[cls][index]
-            if dets == []:
+            if dets == [] or len(dets) == 0:
                 continue
             keep = nms(dets, 0.3)
             all_boxes[cls][index] = dets[keep, :].copy()
@@ -190,6 +219,49 @@ def eval_saved_result():
     eval_kit.evaluate_detections(all_boxes)
 
 
+
+def show():
+    eval_kit = voc_eval_kit('test', '2007', os.path.join(args.data_dir, 'VOCdevkit2007'))
+
+    test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
+                               num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
+
+    if args.multiscale:
+        save_name = os.path.join(args.save_dir, 'detection_result', '{}_multiscale.pkl'.format(args.model_name))
+    else:
+        save_name = os.path.join(args.save_dir, 'detection_result', '{}.pkl'.format(args.model_name))
+
+    saved_data = pickle.load(open(save_name, 'rb'), encoding='latin1')
+    all_boxes = saved_data['all_boxes']
+    cls_scores = saved_data['cls']
+    det_scores = saved_data['det']
+
+    for cls in range(10, 20):
+        for index in range(len(all_boxes[0])):
+            dets = all_boxes[cls][index]
+            if dets == [] or len(dets) == 0:
+                continue
+            keep = nms(dets, 0.3)
+            all_boxes[cls][index] = dets[keep, :].copy()
+
+            c_s = cls_scores[cls][index][keep]
+            d_s = det_scores[cls][index][keep]
+            print(cls)
+            print(all_boxes[cls][index][:10, 4])
+            print(c_s[:10])
+            print(d_s[:10])
+
+            if all_boxes[cls][index][0, 4] > 10:
+                plt.imshow(test_dataset.get_raw_img(index))
+                draw_box(all_boxes[cls][index][0:1, :4], 'black')
+                draw_box(all_boxes[cls][index][1:2, :4], 'red')
+                draw_box(all_boxes[cls][index][2:3, :4], 'green')
+                draw_box(all_boxes[cls][index][3:4, :4], 'blue')
+                draw_box(all_boxes[cls][index][4:5, :4], 'yellow')
+                plt.show()
+    eval_kit.evaluate_detections(all_boxes)
+
+
 if __name__ == '__main__':
-    eval()
-    #eval_saved_result()
+    #eval()
+    eval_saved_result()

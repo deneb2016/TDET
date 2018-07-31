@@ -131,6 +131,23 @@ class TDETDataset(data.Dataset):
         proposals, prop_scores = self.select_proposals(proposals, prop_scores)
         return proposals
 
+    def get_raw_img(self, index):
+        here = None
+        loader_index = 0
+
+        # select proper data loader by index
+        for loader in self._dataset_loaders:
+            if index < len(loader):
+                here = loader.items[index]
+                break
+            else:
+                index -= len(loader)
+                loader_index += 1
+
+        assert here is not None
+        im = imread(here['img_path'])
+        return im
+
     def get_raw_data(self, index):
         here = None
         loader_index = 0
