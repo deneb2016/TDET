@@ -68,7 +68,7 @@ def eval():
     checkpoint = torch.load(load_name)
     if checkpoint['net'] == 'TDET_VGG16':
         model = TDET_VGG16(None, 20, pooling_method=checkpoint['pooling_method'],
-                           cls_specific_det=checkpoint['cls_specific'], share_level=checkpoint['share_level'])
+                           cls_specific_det=checkpoint['cls_specific'], share_level=checkpoint['share_level'], det_softmax=checkpoint['det_softmax'])
     else:
         raise Exception('network is not defined')
     model.load_state_dict(checkpoint['model'])

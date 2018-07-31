@@ -9,13 +9,14 @@ import copy
 
 
 class TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, backprop2det=False, share_level=2, mil_topk=1):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', cls_specific_det=False, backprop2det=False, share_level=2, mil_topk=1, det_softmax='no'):
         super(TDET_VGG16, self).__init__()
         assert 0 <= share_level <= 2
         self.num_classes = num_class
         self.cls_specific_det = cls_specific_det
         self.backprop2det = backprop2det
         self.mil_topk = mil_topk
+        self.det_softmax = det_softmax
         vgg = torchvision.models.vgg16()
         if pretrained_model_path is None:
             print("Create WSDDN_VGG16 without pretrained weights")
@@ -94,7 +95,16 @@ class TDET_VGG16(nn.Module):
         det_score = self.det_layer(shared_feat)
 
         cls_score = F.softmax(cls_score, dim=1)
-        det_score = F.sigmoid(det_score)
+
+        if self.det_softmax == 'no':
+            det_score = F.sigmoid(det_score)
+        elif self.det_softmax == 'before':
+            det_score = F.softmax(det_score, 0)
+        elif self.det_softmax == 'after':
+            det_score = F.sigmoid(det_score)
+            det_score = F.softmax(det_score, 0)
+        else:
+            raise Exception('Undefined det_softmax option')
 
         if self.backprop2det:
             scores = cls_score * det_score
@@ -104,9 +114,11 @@ class TDET_VGG16(nn.Module):
         if image_level_label is None:
             return scores, cls_score, det_score
 
-        image_level_scores, _ = torch.topk(scores, self.mil_topk, dim=0)
+        image_level_scores, _ = torch.topk(scores, min(self.mil_topk, rois.size(0)), dim=0)
         image_level_scores = torch.mean(image_level_scores, 0)
 
+        # to avoid numerical error
+        image_level_scores = torch.clamp(image_level_scores, min=0, max=1)
         loss = F.binary_cross_entropy(image_level_scores, image_level_label.to(torch.float32))
 
         return scores, loss

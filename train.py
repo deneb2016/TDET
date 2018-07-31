@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument('--backprop2det', help='whether or not backprop from score to det', action='store_true')
     parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
     parser.add_argument('--mil_topk', default=1, type=int)
+    parser.add_argument('--det_softmax', help='whether or not use softmax over det branch, before, after or no', default='no', type=str)
 
     parser.add_argument('--prop_method', help='ss, eb, or mcg', default='eb', type=str)
     parser.add_argument('--prop_min_scale', help='minimum proposal box size', default=20, type=int)
@@ -90,7 +91,7 @@ def train():
     if args.net == 'TDET_VGG16':
         model = TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20,
                            pooling_method=args.pooling_method, cls_specific_det=args.cls_specific,
-                           backprop2det=args.backprop2det, share_level=args.share_level, mil_topk=args.mil_topk)
+                           backprop2det=args.backprop2det, share_level=args.share_level, mil_topk=args.mil_topk, det_softmax=args.det_softmax)
     else:
         raise Exception('network is not defined')
 
@@ -208,6 +209,7 @@ def train():
             checkpoint['cls_specific'] = args.cls_specific
             checkpoint['pooling_method'] = args.pooling_method
             checkpoint['share_level'] = args.share_level
+            checkpoint['det_softmax'] = args.det_softmax
             checkpoint['iterations'] = step
             checkpoint['model'] = model.state_dict()
             checkpoint['optimizer'] = optimizer.state_dict()
