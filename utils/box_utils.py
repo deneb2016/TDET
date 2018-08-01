@@ -116,19 +116,19 @@ def sample_proposals(gt_boxes, gt_labels, proposals, max_cnt, pos_ratio):
     if pos_cnt > 0:
         pos_indices = torch.LongTensor(np.random.choice(pos_indices.numpy(), pos_cnt, replace=False))
         selected_proposals.append(proposals[pos_indices])
-        target_obj_labels.append(torch.ones(pos_cnt))
+        target_obj_labels.append(torch.ones(pos_cnt, dtype=torch.long))
         target_cls_labels.append(max_overlap_cls[pos_indices])
 
     if neg_cnt > 0:
         neg_indices = torch.LongTensor(np.random.choice(neg_indices.numpy(), neg_cnt, replace=False))
         selected_proposals.append(proposals[neg_indices])
-        target_obj_labels.append(torch.zeros(neg_cnt))
+        target_obj_labels.append(torch.zeros(neg_cnt, dtype=torch.long))
         target_cls_labels.append(max_overlap_cls[neg_indices])
 
     if len(selected_proposals) == 0:
         selected_proposals = proposals[:1, :]
-        target_obj_labels = torch.zeros(1)
-        target_cls_labels = torch.zeros(1)
+        target_obj_labels = torch.zeros(1, dtype=torch.long)
+        target_cls_labels = torch.zeros(1, dtype=torch.long)
         pos_cnt = 0
         neg_cnt = 1
     else:
