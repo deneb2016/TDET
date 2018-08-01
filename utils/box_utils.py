@@ -1,3 +1,10 @@
+# --------------------------------------------------------
+# PyTorch WSDDN
+# Copyright 2018. Seungkwan Lee
+# Licensed under The MIT License [see LICENSE for details]
+# Written by Seungkwan Lee
+# Some parts of this implementation are based on code from Ross Girshick, Jiasen Lu, and Jianwei Yang
+# --------------------------------------------------------
 import torch
 import numpy as np
 
@@ -81,9 +88,10 @@ def to_minmax_form(boxes):
     return torch.stack([xmin, ymin, xmax, ymax])
 
 
-def sample_proposals(gt_boxes, proposals, max_cnt, pos_ratio):
+def sample_proposals(gt_boxes, gt_labels, proposals, max_cnt, pos_ratio):
     iou = all_pair_iou(proposals, gt_boxes)
-    iou, _ = iou.max(1)
+    iou, max_overlap_box = iou.max(1)
+    max_overlap_cls = gt_labels[max_overlap_box]
 
     pos_indices = torch.nonzero(iou.gt(0.5)).squeeze()
     neg_indices = torch.nonzero(iou.gt(0.1) * iou.lt(0.5)).squeeze()
@@ -102,25 +110,30 @@ def sample_proposals(gt_boxes, proposals, max_cnt, pos_ratio):
     neg_cnt = min(neg_cnt, max_cnt - pos_cnt)
 
     selected_proposals = []
-    target_labels = []
+    target_obj_labels = []
+    target_cls_labels = []
 
     if pos_cnt > 0:
         pos_indices = torch.LongTensor(np.random.choice(pos_indices.numpy(), pos_cnt, replace=False))
         selected_proposals.append(proposals[pos_indices])
-        target_labels.append(torch.ones(pos_cnt))
+        target_obj_labels.append(torch.ones(pos_cnt))
+        target_cls_labels.append(max_overlap_cls[pos_indices])
 
     if neg_cnt > 0:
         neg_indices = torch.LongTensor(np.random.choice(neg_indices.numpy(), neg_cnt, replace=False))
         selected_proposals.append(proposals[neg_indices])
-        target_labels.append(torch.zeros(neg_cnt))
+        target_obj_labels.append(torch.zeros(neg_cnt))
+        target_cls_labels.append(max_overlap_cls[neg_indices])
 
     if len(selected_proposals) == 0:
         selected_proposals = proposals[:1, :]
-        target_labels = torch.zeros(1)
+        target_obj_labels = torch.zeros(1)
+        target_cls_labels = torch.zeros(1)
         pos_cnt = 0
         neg_cnt = 1
     else:
         selected_proposals = torch.cat(selected_proposals)
-        target_labels = torch.cat(target_labels)
+        target_obj_labels = torch.cat(target_obj_labels)
+        target_cls_labels = torch.cat(target_cls_labels)
 
-    return selected_proposals, target_labels, pos_cnt, neg_cnt
+    return selected_proposals, target_obj_labels, target_cls_labels, pos_cnt, neg_cnt
