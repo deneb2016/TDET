@@ -68,7 +68,7 @@ def eval():
     checkpoint = torch.load(load_name)
     if checkpoint['net'] == 'TDET_VGG16':
         model = TDET_VGG16(None, 20, pooling_method=checkpoint['pooling_method'],
-                           cls_specific_det=checkpoint['cls_specific'], share_level=checkpoint['share_level'],
+                           cls_specific_det=checkpoint['cls_specific'] if checkpoint['cls_specific'] is not False else 'no', share_level=checkpoint['share_level'],
                            det_softmax=checkpoint['det_softmax'] if 'det_softmax' in checkpoint else 'no',
                            det_choice=checkpoint['det_choice'] if 'det_choice' in checkpoint else 1)
     else:
@@ -233,7 +233,7 @@ def show():
     cls_scores = saved_data['cls']
     det_scores = saved_data['det']
 
-    for cls in range(1, 20):
+    for cls in range(15, 20):
         for index in range(len(all_boxes[0])):
             dets = all_boxes[cls][index]
             if dets == [] or len(dets) == 0:
