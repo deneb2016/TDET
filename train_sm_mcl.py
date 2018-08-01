@@ -89,7 +89,7 @@ def train():
 
     lr = args.lr
 
-    if args.net == 'TDET_VGG16':
+    if args.net == 'SM_MCL_TDET_VGG16':
         model = SM_MCL_TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), num_class=20,
                            pooling_method=args.pooling_method, share_level=args.share_level, mil_topk=args.mil_topk,
                            num_group=args.num_group, use_predefined_group=args.group_method != 'mcl', attention_lr=args.attention_lr)
