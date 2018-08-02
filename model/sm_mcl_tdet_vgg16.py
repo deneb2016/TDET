@@ -126,11 +126,11 @@ class SM_MCL_TDET_VGG16(nn.Module):
 
         if self.use_predefined_group:
             groups = predefined_groups + 1
-            neg_mask = gt_labels.lt(0.5)
+            neg_mask = gt_labels.eq(0)
             groups[neg_mask] = 0
         else:
             groups = det_score.new_zeros(size=[N], dtype=torch.long)
-            pos_mask = gt_labels.gt(0.5)
+            pos_mask = gt_labels.eq(1)
             _, max_score_indices = torch.max(det_score[:, 1:], 1)
             max_score_indices = max_score_indices + 1
             groups[pos_mask] = max_score_indices[pos_mask]
