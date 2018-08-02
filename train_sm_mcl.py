@@ -124,6 +124,7 @@ def train():
     source_pos_prop_sum = 0
     source_neg_prop_sum = 0
     target_prop_sum = 0
+    group_dominance = torch.zeros(args.num_group + 1).to(device)
     start = time.time()
     for step in range(args.start_iter, args.max_iter + 1):
         if step % len(source_train_dataset) == 1:
@@ -155,7 +156,9 @@ def train():
         optimizer.zero_grad()
 
         # source forward & backward
-        source_loss = model.forward_det_only(source_im_data, source_proposals, source_obj_labels, source_groups)
+        source_loss, allocated_groups = model.forward_det_only(source_im_data, source_proposals, source_obj_labels, source_groups)
+        for i in range(args.num_group + 1):
+            group_dominance[i] = group_dominance[i] + allocated_groups.eq(i).float().sum()
         source_loss_sum += source_loss.item()
         source_loss = source_loss * (1 - args.alpha)
         source_loss.backward()
@@ -184,6 +187,8 @@ def train():
             log_message = "[%s][session %d][iter %4d] loss: %.4f, src_loss: %.4f, tar_loss: %.4f, pos_prop: %.1f, neg_prop: %.1f, tar_prop: %.1f, lr: %.2e, time: %.1f" % \
                           (args.net, args.session, step, loss_sum, source_loss_sum, target_loss_sum, source_pos_prop_sum, source_neg_prop_sum, target_prop_sum, lr, end - start)
             print(log_message)
+            print(group_dominance)
+            group_dominance[:] = 0
             log_file.write(log_message + '\n')
             log_file.flush()
             source_loss_sum = 0

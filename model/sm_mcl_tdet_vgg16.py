@@ -136,7 +136,7 @@ class SM_MCL_TDET_VGG16(nn.Module):
             groups[pos_mask] = max_score_indices[pos_mask]
 
         loss = F.cross_entropy(det_score, groups)
-        return loss
+        return loss, groups
 
     def get_optimizer(self, init_lr):
         params = []
