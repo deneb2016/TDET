@@ -100,8 +100,8 @@ class SM_MCL_TDET_VGG16(nn.Module):
         cls_score = F.softmax(cls_score, dim=1)
         det_score = F.softmax(det_score, dim=1)
 
-        # remove background score
-        det_score = det_score[:, 1:]
+        # remove background score and cut backward connection
+        det_score = det_score[:, 1:].detach()
 
         # apply attention
         det_score = self.attention_layer(det_score)
