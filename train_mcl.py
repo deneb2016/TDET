@@ -152,7 +152,7 @@ def train():
 
         # source forward & backward
         if args.select_level == 'img':
-            source_loss, selected_group = model.forward_det_img_level(source_im_data, source_proposals, source_obj_labels)
+            source_loss, selected_group = model.forward_det_img_level_topk(source_im_data, source_proposals, source_obj_labels)
             group_dominance[selected_group] = group_dominance[selected_group] + 1
         elif args.select_level == 'obj':
             source_loss, selected_group_cnt = model.forward_det_obj_level(source_im_data, source_proposals, source_obj_labels, source_box_labels)

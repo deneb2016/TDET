@@ -92,7 +92,7 @@ def train():
     if args.net == 'SM_MCL_TDET_VGG16':
         model = SM_MCL_TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), num_class=20,
                            pooling_method=args.pooling_method, share_level=args.share_level, mil_topk=args.mil_topk,
-                           num_group=args.num_group, use_predefined_group=args.group_method != 'mcl', attention_lr=args.attention_lr)
+                           num_group=args.num_group,  attention_lr=args.attention_lr)
     else:
         raise Exception('network is not defined')
 
@@ -124,7 +124,7 @@ def train():
     source_pos_prop_sum = 0
     source_neg_prop_sum = 0
     target_prop_sum = 0
-    group_dominance = torch.zeros(args.num_group + 1).to(device)
+    group_dominance = np.zeros(args.num_group + 1)
     start = time.time()
     for step in range(args.start_iter, args.max_iter + 1):
         if step % len(source_train_dataset) == 1:
@@ -141,13 +141,11 @@ def train():
         source_im_data = source_batch['im_data'].unsqueeze(0).to(device)
         source_proposals = source_batch['proposals']
         source_gt_boxes = source_batch['gt_boxes']
-        source_gt_labels = source_batch['gt_labels']
-        source_proposals, source_obj_labels, source_cls_labels, pos_cnt, neg_cnt = sample_proposals(source_gt_boxes, source_gt_labels, source_proposals, args.bs, args.pos_ratio)
+        source_proposals, source_obj_labels, source_box_labels, pos_cnt, neg_cnt = sample_proposals(source_gt_boxes, source_proposals, args.bs, args.pos_ratio)
         source_proposals = source_proposals.to(device)
         source_obj_labels = source_obj_labels.to(device)
-        source_groups = None
-        if args.group_method == 'cls':
-            source_groups = source_cls_labels.to(device)
+        # if args.group_method == 'cls':
+        #     source_groups = source_cls_labels.to(device)
 
         target_im_data = target_batch['im_data'].unsqueeze(0).to(device)
         target_proposals = target_batch['proposals'].to(device)
@@ -156,9 +154,9 @@ def train():
         optimizer.zero_grad()
 
         # source forward & backward
-        source_loss, allocated_groups = model.forward_det_only(source_im_data, source_proposals, source_obj_labels, source_groups)
+        source_loss, allocated_groups = model.forward_det_only(source_im_data, source_proposals, step > 10000, source_obj_labels)
         for i in range(args.num_group + 1):
-            group_dominance[i] = group_dominance[i] + allocated_groups.eq(i).float().sum()
+            group_dominance[i] = group_dominance[i] + allocated_groups.eq(i).sum().item()
         source_loss_sum += source_loss.item()
         source_loss = source_loss * (1 - args.alpha)
         source_loss.backward()

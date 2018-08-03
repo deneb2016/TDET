@@ -130,6 +130,19 @@ class MCL_TDET_VGG16(nn.Module):
         selected_group = selected_group.item()
         return loss, selected_group
 
+    def forward_det_img_level_topk(self, im_data, rois, objectness_labels):
+        N = rois.size(0)
+        shared_feat = self.forward_shared_feat(im_data, rois)
+        det_score = self.det_layer(shared_feat)
+        objectness_labels = objectness_labels.view(N, 1).expand(det_score.size())
+        all_loss = F.binary_cross_entropy_with_logits(det_score, objectness_labels.to(torch.float32), reduce=False)
+
+        per_group_loss = torch.mean(all_loss, 0)
+        sorted_loss, sorted_group = torch.sort(per_group_loss, 0)
+        loss = sorted_loss[:-1].mean()
+        selected_group = sorted_group[-1].item()
+        return loss, selected_group
+
     def forward_det_obj_level(self, im_data, rois, objectness_labels, box_labels):
         N = rois.size(0)
         shared_feat = self.forward_shared_feat(im_data, rois)
@@ -157,6 +170,8 @@ class MCL_TDET_VGG16(nn.Module):
             if value.requires_grad:
                 lr = init_lr
                 weight_decay = 0.0005
+                if 'det_layer' in key:
+                    lr = lr * (self.num_group - 1)
                 if 'bias' in key:
                     lr = lr * 2
                     weight_decay = 0
