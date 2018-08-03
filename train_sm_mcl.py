@@ -162,10 +162,11 @@ def train():
         source_loss.backward()
 
         # target forward & backward
-        _, target_loss = model(target_im_data, target_proposals, target_image_level_label)
-        target_loss_sum += target_loss.item()
-        target_loss = target_loss * args.alpha
-        target_loss.backward()
+        if step > 20000:
+            _, target_loss = model(target_im_data, target_proposals, target_image_level_label)
+            target_loss_sum += target_loss.item()
+            target_loss = target_loss * args.alpha
+            target_loss.backward()
 
         clip_gradient(model, 10.0)
         optimizer.step()
