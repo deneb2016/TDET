@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument('--num_group', default=1, type=int)
     parser.add_argument('--attention_lr', default=1.0, type=float)
     parser.add_argument('--group_method', help='mcl or cls', default='mcl', type=str)
+    parser.add_argument('--mcl_start', default=10000, type=int)
+    parser.add_argument('--target_start', default=20000, type=int)
 
     parser.add_argument('--prop_method', help='ss, eb, or mcg', default='eb', type=str)
     parser.add_argument('--prop_min_scale', help='minimum proposal box size', default=20, type=int)
@@ -154,7 +156,7 @@ def train():
         optimizer.zero_grad()
 
         # source forward & backward
-        source_loss, allocated_groups = model.forward_det_only(source_im_data, source_proposals, step > 10000, source_obj_labels)
+        source_loss, allocated_groups = model.forward_det_only(source_im_data, source_proposals, step > args.mcl_start, source_obj_labels)
         for i in range(args.num_group + 1):
             group_dominance[i] = group_dominance[i] + allocated_groups.eq(i).sum().item()
         source_loss_sum += source_loss.item()
@@ -162,7 +164,7 @@ def train():
         source_loss.backward()
 
         # target forward & backward
-        if step > 20000:
+        if step > args.target_start:
             _, target_loss = model(target_im_data, target_proposals, target_image_level_label)
             target_loss_sum += target_loss.item()
             target_loss = target_loss * args.alpha
