@@ -118,20 +118,38 @@ class MCL_TDET_VGG16(nn.Module):
 
         return scores, loss
 
-    def forward_det_only(self, im_data, rois, gt_labels=None, mcl=False):
+    def forward_det_img_level(self, im_data, rois, objectness_labels):
         N = rois.size(0)
         shared_feat = self.forward_shared_feat(im_data, rois)
         det_score = self.det_layer(shared_feat)
-        gt_labels = gt_labels.view(N, 1).expand(det_score.size())
-        all_loss = F.binary_cross_entropy_with_logits(det_score, gt_labels.to(torch.float32), reduce=False)
-        if mcl:
-            per_group_loss = torch.mean(all_loss, 0)
-            loss, selected_group = torch.min(per_group_loss, 0)
-            selected_group = selected_group.item()
-        else:
-            loss = torch.mean(all_loss)
-            selected_group = 0
+        objectness_labels = objectness_labels.view(N, 1).expand(det_score.size())
+        all_loss = F.binary_cross_entropy_with_logits(det_score, objectness_labels.to(torch.float32), reduce=False)
+
+        per_group_loss = torch.mean(all_loss, 0)
+        loss, selected_group = torch.min(per_group_loss, 0)
+        selected_group = selected_group.item()
         return loss, selected_group
+
+    def forward_det_obj_level(self, im_data, rois, objectness_labels, box_labels):
+        N = rois.size(0)
+        shared_feat = self.forward_shared_feat(im_data, rois)
+        det_score = self.det_layer(shared_feat)
+        objectness_labels = objectness_labels.view(N, 1).expand(det_score.size())
+        all_loss = F.binary_cross_entropy_with_logits(det_score, objectness_labels.to(torch.float32), reduce=False)
+        loss = 0
+        selected_group_cnt = np.zeros(self.num_group)
+        for box_id in range(torch.max(box_labels).item() + 1):
+            mask = box_labels.eq(box_id)
+            if mask.sum() == 0:
+                continue
+            prop_indices = mask.nonzero().view(-1)
+            this_box_loss = all_loss[prop_indices]
+            this_box_per_group_loss = torch.sum(this_box_loss, 0)
+            local_loss, selected_group = torch.min(this_box_per_group_loss, 0)
+            loss = loss + local_loss
+            selected_group_cnt[selected_group] += 1
+        loss = loss / N
+        return loss, selected_group_cnt
 
     def get_optimizer(self, init_lr):
         params = []

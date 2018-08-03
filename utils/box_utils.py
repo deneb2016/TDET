@@ -88,10 +88,9 @@ def to_minmax_form(boxes):
     return torch.stack([xmin, ymin, xmax, ymax])
 
 
-def sample_proposals(gt_boxes, gt_labels, proposals, max_cnt, pos_ratio):
+def sample_proposals(gt_boxes, proposals, max_cnt, pos_ratio):
     iou = all_pair_iou(proposals, gt_boxes)
     iou, max_overlap_box = iou.max(1)
-    max_overlap_cls = gt_labels[max_overlap_box]
 
     pos_indices = torch.nonzero(iou.gt(0.5)).squeeze()
     neg_indices = torch.nonzero(iou.gt(0.1) * iou.lt(0.5)).squeeze()
@@ -111,29 +110,29 @@ def sample_proposals(gt_boxes, gt_labels, proposals, max_cnt, pos_ratio):
 
     selected_proposals = []
     target_obj_labels = []
-    target_cls_labels = []
+    target_box_indices = []
 
     if pos_cnt > 0:
         pos_indices = torch.LongTensor(np.random.choice(pos_indices.numpy(), pos_cnt, replace=False))
         selected_proposals.append(proposals[pos_indices])
         target_obj_labels.append(torch.ones(pos_cnt, dtype=torch.long))
-        target_cls_labels.append(max_overlap_cls[pos_indices])
+        target_box_indices.append(max_overlap_box[pos_indices])
 
     if neg_cnt > 0:
         neg_indices = torch.LongTensor(np.random.choice(neg_indices.numpy(), neg_cnt, replace=False))
         selected_proposals.append(proposals[neg_indices])
         target_obj_labels.append(torch.zeros(neg_cnt, dtype=torch.long))
-        target_cls_labels.append(max_overlap_cls[neg_indices])
+        target_box_indices.append(max_overlap_box[neg_indices])
 
     if len(selected_proposals) == 0:
         selected_proposals = proposals[:1, :]
         target_obj_labels = torch.zeros(1, dtype=torch.long)
-        target_cls_labels = torch.zeros(1, dtype=torch.long)
+        target_box_indices = torch.zeros(1, dtype=torch.long)
         pos_cnt = 0
         neg_cnt = 1
     else:
         selected_proposals = torch.cat(selected_proposals)
         target_obj_labels = torch.cat(target_obj_labels)
-        target_cls_labels = torch.cat(target_cls_labels)
+        target_box_indices = torch.cat(target_box_indices)
 
-    return selected_proposals, target_obj_labels, target_cls_labels, pos_cnt, neg_cnt
+    return selected_proposals, target_obj_labels, target_box_indices, pos_cnt, neg_cnt

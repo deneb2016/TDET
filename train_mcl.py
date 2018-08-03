@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument('--data_dir', help='directory to load data', default='../data', type=str)
 
     parser.add_argument('--pooling_method', help='roi_pooling or roi_align', default='roi_pooling', type=str)
+    parser.add_argument('--select_level', help='img or obj', default='img', type=str)
     parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
     parser.add_argument('--mil_topk', default=1, type=int)
     parser.add_argument('--num_group', default=1, type=int)
@@ -139,8 +140,7 @@ def train():
         source_im_data = source_batch['im_data'].unsqueeze(0).to(device)
         source_proposals = source_batch['proposals']
         source_gt_boxes = source_batch['gt_boxes']
-        source_gt_labels = source_batch['gt_labels']
-        source_proposals, source_obj_labels, source_cls_labels, pos_cnt, neg_cnt = sample_proposals(source_gt_boxes, source_gt_labels, source_proposals, args.bs, args.pos_ratio)
+        source_proposals, source_obj_labels, source_box_labels, pos_cnt, neg_cnt = sample_proposals(source_gt_boxes, source_proposals, args.bs, args.pos_ratio)
         source_proposals = source_proposals.to(device)
         source_obj_labels = source_obj_labels.to(device)
 
@@ -151,8 +151,14 @@ def train():
         optimizer.zero_grad()
 
         # source forward & backward
-        source_loss, selected_group = model.forward_det_only(source_im_data, source_proposals, source_obj_labels, True)
-        group_dominance[selected_group] = group_dominance[selected_group] + 1
+        if args.select_level == 'img':
+            source_loss, selected_group = model.forward_det_img_level(source_im_data, source_proposals, source_obj_labels)
+            group_dominance[selected_group] = group_dominance[selected_group] + 1
+        elif args.select_level == 'obj':
+            source_loss, selected_group_cnt = model.forward_det_obj_level(source_im_data, source_proposals, source_obj_labels, source_box_labels)
+            group_dominance = group_dominance + selected_group_cnt
+        else:
+            raise Exception('Undefined select level')
         source_loss_sum += source_loss.item()
         source_loss = source_loss * (1 - args.alpha)
         source_loss.backward()
