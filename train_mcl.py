@@ -25,9 +25,9 @@ def parse_args():
     parser.add_argument('--data_dir', help='directory to load data', default='../data', type=str)
 
     parser.add_argument('--pooling_method', help='roi_pooling or roi_align', default='roi_pooling', type=str)
-    parser.add_argument('--select_level', help='img or obj', default='img', type=str)
     parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
     parser.add_argument('--mil_topk', default=1, type=int)
+    parser.add_argument('--mcl_topk', default=1, type=int)
     parser.add_argument('--num_group', default=1, type=int)
     parser.add_argument('--attention_lr', default=1.0, type=float)
 
@@ -91,7 +91,7 @@ def train():
     if args.net == 'MCL_TDET_VGG16':
         model = MCL_TDET_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), num_class=20,
                            pooling_method=args.pooling_method, share_level=args.share_level, mil_topk=args.mil_topk,
-                           num_group=args.num_group, attention_lr=args.attention_lr)
+                           num_group=args.num_group, attention_lr=args.attention_lr, mcl_topk=args.mcl_topk)
     else:
         raise Exception('network is not defined')
 
@@ -148,29 +148,24 @@ def train():
         target_proposals = target_batch['proposals'].to(device)
         target_image_level_label = target_batch['image_level_label'].to(device)
 
-        optimizer.zero_grad()
 
         # source forward & backward
-        if args.select_level == 'img':
-            source_loss, selected_group = model.forward_det_img_level_topk(source_im_data, source_proposals, source_obj_labels)
-            group_dominance[selected_group] = group_dominance[selected_group] + 1
-        elif args.select_level == 'obj':
-            source_loss, selected_group_cnt = model.forward_det_obj_level(source_im_data, source_proposals, source_obj_labels, source_box_labels)
-            group_dominance = group_dominance + selected_group_cnt
-        else:
-            raise Exception('Undefined select level')
+        source_loss, selected_group_cnt = model.forward_det_obj_level_topk(source_im_data, source_proposals, source_obj_labels, source_box_labels)
+        group_dominance = group_dominance + selected_group_cnt
         source_loss_sum += source_loss.item()
         source_loss = source_loss * (1 - args.alpha)
         source_loss.backward()
 
-        # target forward & backward
-        _, target_loss = model(target_im_data, target_proposals, target_image_level_label)
-        target_loss_sum += target_loss.item()
-        target_loss = target_loss * args.alpha
-        target_loss.backward()
+        #target forward & backward
+        if step > 10000:
+            _, target_loss = model(target_im_data, target_proposals, target_image_level_label)
+            target_loss_sum += target_loss.item()
+            target_loss = target_loss * args.alpha
+            target_loss.backward()
 
         clip_gradient(model, 10.0)
         optimizer.step()
+        optimizer.zero_grad()
         source_pos_prop_sum += pos_cnt
         source_neg_prop_sum += neg_cnt
         target_prop_sum += target_proposals.size(0)

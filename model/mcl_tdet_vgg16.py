@@ -10,7 +10,7 @@ from model.attention_layer import AttentionLayer
 
 
 class MCL_TDET_VGG16(nn.Module):
-    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', share_level=2, mil_topk=1, num_group=1, attention_lr=1.0):
+    def __init__(self, pretrained_model_path=None, num_class=20, pooling_method='roi_pooling', share_level=2, mil_topk=1, num_group=1, attention_lr=1.0, mcl_topk=1):
         super(MCL_TDET_VGG16, self).__init__()
         assert 0 <= share_level <= 2
         self.num_classes = num_class
@@ -18,6 +18,7 @@ class MCL_TDET_VGG16(nn.Module):
         self.num_group = num_group
         self.attention_layer = AttentionLayer(num_group, num_class)
         self.attention_lr = attention_lr
+        self.mcl_topk = mcl_topk
 
         vgg = torchvision.models.vgg16()
         if pretrained_model_path is None:
@@ -78,7 +79,8 @@ class MCL_TDET_VGG16(nn.Module):
                 m.weight.data.normal_().fmod_(2).mul_(stddev).add_(mean) # not a perfect approximation
             else:
                 m.weight.data.normal_(mean, stddev)
-                m.bias.data.zero_()
+                if m.bias is not None:
+                    m.bias.data.zero_()
 
         normal_init(self.cls_layer[-1], 0, 0.01, False)
         normal_init(self.det_layer[-1], 0, 0.01, False)
@@ -143,7 +145,7 @@ class MCL_TDET_VGG16(nn.Module):
         selected_group = sorted_group[-1].item()
         return loss, selected_group
 
-    def forward_det_obj_level(self, im_data, rois, objectness_labels, box_labels):
+    def forward_det_obj_level_topk(self, im_data, rois, objectness_labels, box_labels):
         N = rois.size(0)
         shared_feat = self.forward_shared_feat(im_data, rois)
         det_score = self.det_layer(shared_feat)
@@ -158,10 +160,34 @@ class MCL_TDET_VGG16(nn.Module):
             prop_indices = mask.nonzero().view(-1)
             this_box_loss = all_loss[prop_indices]
             this_box_per_group_loss = torch.sum(this_box_loss, 0)
-            local_loss, selected_group = torch.min(this_box_per_group_loss, 0)
+            sorted_loss, sorted_group = torch.sort(this_box_per_group_loss, 0)
+            local_loss = sorted_loss[:self.mcl_topk].sum()
             loss = loss + local_loss
-            selected_group_cnt[selected_group] += 1
-        loss = loss / N
+            for i in range(self.mcl_topk):
+                selected_group_cnt[sorted_group[i]] += 1
+        loss = loss / (N * self.mcl_topk)
+        return loss, selected_group_cnt
+
+    def forward_det_obj_level_share_negative(self, im_data, rois, objectness_labels, k):
+        N = rois.size(0)
+        shared_feat = self.forward_shared_feat(im_data, rois)
+        det_score = self.det_layer(shared_feat)
+        objectness_labels = objectness_labels.view(N, 1).expand(det_score.size())
+        all_loss = F.binary_cross_entropy_with_logits(det_score, objectness_labels.to(torch.float32), reduce=False)
+
+        neg_loss = all_loss[objectness_labels.eq(0)]
+        selected_group_cnt = np.zeros(self.num_group)
+
+        if objectness_labels.sum() > 0:
+            pos_loss = all_loss[objectness_labels.eq(1)].view(-1, self.num_group)
+            sorted_pos_loss, sorted_index = torch.sort(pos_loss, 1)
+            selected_pos_loss = sorted_pos_loss[:, 0:k]
+            selected_index = sorted_index[:, 0:k]
+            for i in range(self.num_group):
+                selected_group_cnt[i] = torch.sum(selected_index == i).item()
+            loss = (selected_pos_loss.sum() + neg_loss.sum()) / (selected_pos_loss.numel() + neg_loss.numel())
+        else:
+            loss = neg_loss.mean()
         return loss, selected_group_cnt
 
     def get_optimizer(self, init_lr):
@@ -171,7 +197,7 @@ class MCL_TDET_VGG16(nn.Module):
                 lr = init_lr
                 weight_decay = 0.0005
                 if 'det_layer' in key:
-                    lr = lr * (self.num_group - 1)
+                    lr = lr * self.mcl_topk
                 if 'bias' in key:
                     lr = lr * 2
                     weight_decay = 0
