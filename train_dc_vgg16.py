@@ -124,27 +124,35 @@ def train():
         source_pos_cls = [i for i in range(80) if i in source_gt_labels]
         source_pos_cls = np.random.choice(source_pos_cls, min(args.bs // 2, len(source_pos_cls)), replace=False)
         source_neg_cls = [i for i in range(80) if i not in source_gt_labels]
-        source_neg_cls = np.random.choice(source_neg_cls, min(args.bs - len(source_pos_cls), len(source_neg_cls)), replace=False)
+        source_neg_cls = np.random.choice(source_neg_cls, min(args.bs // 2, len(source_neg_cls)), replace=False)
 
         target_im_data = target_batch['im_data'].unsqueeze(0).to(device)
         target_gt_labels = target_batch['gt_labels']
         target_pos_cls = [i for i in range(80) if i in target_gt_labels]
         target_pos_cls = np.random.choice(target_pos_cls, min(args.bs // 2, len(target_pos_cls)), replace=False)
         target_neg_cls = [i for i in range(80) if i not in target_gt_labels]
-        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs - len(target_pos_cls), len(target_neg_cls)), replace=False)
+        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs // 2, len(target_neg_cls)), replace=False)
         optimizer.zero_grad()
 
         # source forward & backward
-        source_loss = model.forward(source_im_data, source_pos_cls, source_neg_cls)
-        source_loss_sum += source_loss.item()
-        source_loss = source_loss * 0.5
-        source_loss.backward()
+        source_cls_cnt = len(source_pos_cls) + len(source_neg_cls)
+        source_pos_loss = model.forward(source_im_data, source_pos_cls, []) * 0.5 * (len(source_pos_cls) / source_cls_cnt)
+        source_pos_loss.backward()
+        source_loss_sum += source_pos_loss.item() * 2
+
+        source_neg_loss = model.forward(source_im_data, [], source_neg_cls) * 0.5 * (len(source_neg_cls) / source_cls_cnt)
+        source_neg_loss.backward()
+        source_loss_sum += source_neg_loss.item() * 2
 
         # target forward & backward
-        target_loss = model(target_im_data, target_pos_cls, target_neg_cls)
-        target_loss_sum += target_loss.item()
-        target_loss = target_loss * 0.5
-        target_loss.backward()
+        target_cls_cnt = len(target_pos_cls) + len(target_neg_cls)
+        target_pos_loss = model.forward(target_im_data, target_pos_cls, []) * 0.5 * (len(target_pos_cls) / target_cls_cnt)
+        target_pos_loss.backward()
+        target_loss_sum += target_pos_loss.item() * 2
+
+        target_neg_loss = model.forward(target_im_data, [], target_neg_cls) * 0.5 * (len(target_neg_cls) / target_cls_cnt)
+        target_neg_loss.backward()
+        target_loss_sum += target_neg_loss.item() * 2
 
         clip_gradient(model, 10.0)
         optimizer.step()
