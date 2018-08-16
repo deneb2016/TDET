@@ -48,26 +48,7 @@ class DC_VGG16_CLS(nn.Module):
         normal_init(self.extra_conv[0], 0, 0.001, False)
         normal_init(self.classifier, 0, 0.001, False)
 
-    def forward(self, im_data, pos_cls, neg_cls):
-        target_labels = torch.cat([torch.ones(len(pos_cls)), torch.zeros(len(neg_cls))]).cuda()
-
-        feat = self.C1(im_data)
-        cls_feat = []
-        for cls in pos_cls:
-            cls_feat.append(self.C2[cls](feat))
-        for cls in neg_cls:
-            cls_feat.append(self.C2[cls](feat))
-
-        cls_feat = torch.cat(cls_feat)
-        cls_feat = self.C3(cls_feat)
-        cls_feat = self.extra_conv(cls_feat)
-        cls_feat = self.gap(cls_feat).view(-1, 1024)
-        scores = self.classifier(cls_feat).view(-1)
-
-        loss = F.binary_cross_entropy_with_logits(scores, target_labels)
-        return loss
-
-    def inference(self, im_data, target_cls):
+    def forward(self, im_data, target_cls, target_labels=None):
         feat = self.C1(im_data)
         cls_feat = []
         for cls in target_cls:
@@ -78,9 +59,11 @@ class DC_VGG16_CLS(nn.Module):
         cls_feat = self.extra_conv(cls_feat)
         cls_feat = self.gap(cls_feat).view(-1, 1024)
         scores = self.classifier(cls_feat).view(-1)
-        scores = F.sigmoid(scores)
-
-        return scores
+        if target_labels is None:
+            return F.sigmoid(scores)
+        else:
+            loss = F.binary_cross_entropy_with_logits(scores, target_labels)
+            return loss
 
     def get_optimizer(self, init_lr):
         params = []

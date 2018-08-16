@@ -57,6 +57,7 @@ def train():
     args = parse_args()
     print('Called with args:')
     print(args)
+    assert args.bs % 2 == 0
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -124,35 +125,32 @@ def train():
         source_pos_cls = [i for i in range(80) if i in source_gt_labels]
         source_pos_cls = np.random.choice(source_pos_cls, min(args.bs // 2, len(source_pos_cls)), replace=False)
         source_neg_cls = [i for i in range(80) if i not in source_gt_labels]
-        source_neg_cls = np.random.choice(source_neg_cls, min(args.bs // 2, len(source_neg_cls)), replace=False)
+        source_neg_cls = np.random.choice(source_neg_cls, min(args.bs - len(source_pos_cls), len(source_neg_cls)), replace=False)
+        source_selected_cls = np.concatenate([source_pos_cls, source_neg_cls])
+        source_labels = torch.cat([torch.ones(len(source_pos_cls)), torch.zeros(len(source_neg_cls))]).to(device)
 
         target_im_data = target_batch['im_data'].unsqueeze(0).to(device)
         target_gt_labels = target_batch['gt_labels']
         target_pos_cls = [i for i in range(80) if i in target_gt_labels]
         target_pos_cls = np.random.choice(target_pos_cls, min(args.bs // 2, len(target_pos_cls)), replace=False)
         target_neg_cls = [i for i in range(80) if i not in target_gt_labels]
-        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs // 2, len(target_neg_cls)), replace=False)
+        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs - len(target_pos_cls), len(target_neg_cls)), replace=False)
+        target_selected_cls = np.concatenate([target_pos_cls, target_neg_cls])
+        target_labels = torch.cat([torch.ones(len(target_pos_cls)), torch.zeros(len(target_neg_cls))]).to(device)
+
         optimizer.zero_grad()
 
         # source forward & backward
-        source_cls_cnt = len(source_pos_cls) + len(source_neg_cls)
-        source_pos_loss = model.forward(source_im_data, source_pos_cls, []) * 0.5 * (len(source_pos_cls) / source_cls_cnt)
-        source_pos_loss.backward()
-        source_loss_sum += source_pos_loss.item() * 2
-
-        source_neg_loss = model.forward(source_im_data, [], source_neg_cls) * 0.5 * (len(source_neg_cls) / source_cls_cnt)
-        source_neg_loss.backward()
-        source_loss_sum += source_neg_loss.item() * 2
+        for i in range(0, args.bs, 2):
+            here_loss = model.forward(source_im_data, source_selected_cls[i:i + 2], source_labels[i:i+2]) / args.bs
+            here_loss.backward()
+            source_loss_sum += here_loss.item() * 2
 
         # target forward & backward
-        target_cls_cnt = len(target_pos_cls) + len(target_neg_cls)
-        target_pos_loss = model.forward(target_im_data, target_pos_cls, []) * 0.5 * (len(target_pos_cls) / target_cls_cnt)
-        target_pos_loss.backward()
-        target_loss_sum += target_pos_loss.item() * 2
-
-        target_neg_loss = model.forward(target_im_data, [], target_neg_cls) * 0.5 * (len(target_neg_cls) / target_cls_cnt)
-        target_neg_loss.backward()
-        target_loss_sum += target_neg_loss.item() * 2
+        for i in range(0, args.bs, 2):
+            here_loss = model.forward(target_im_data, target_selected_cls[i:i + 2], target_labels[i:i+2]) / args.bs
+            here_loss.backward()
+            target_loss_sum += here_loss.item() * 2
 
         clip_gradient(model, 10.0)
         optimizer.step()
