@@ -6,9 +6,9 @@ import torchvision
 import copy
 
 
-class DC_VGG16_FEAT(nn.Module):
+class DC_VGG16_CLS(nn.Module):
     def __init__(self, pretrained_model_path=None, num_class=80, specific_from=3, specific_to=3):
-        super(DC_VGG16_FEAT, self).__init__()
+        super(DC_VGG16_CLS, self).__init__()
         assert specific_from <= specific_to
         self.num_classes = num_class
         self.specific_from = specific_from

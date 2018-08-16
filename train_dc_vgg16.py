@@ -7,7 +7,7 @@ import torch
 
 from utils.net_utils import adjust_learning_rate, save_checkpoint, clip_gradient, calc_grad_norm
 from utils.box_utils import sample_proposals
-from model.dc_vgg16 import DC_VGG16
+from model.dc_vgg16 import DC_VGG16_CLS
 from datasets.tdet_dataset import TDETDataset
 from matplotlib import pyplot as plt
 import torch.nn.functional as F
@@ -76,7 +76,7 @@ def train():
     lr = args.lr
 
     if args.net == 'DC_VGG16':
-        model = DC_VGG16(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth') if not args.resume else None, 80, args.specific_from, args.specific_to)
+        model = DC_VGG16_CLS(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth') if not args.resume else None, 80, args.specific_from, args.specific_to)
     else:
         raise Exception('network is not defined')
 
