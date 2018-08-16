@@ -78,7 +78,7 @@ class TDETDataset(data.Dataset):
         im_size_min = np.min(im_shape[0:2])
         im_size_max = np.max(im_shape[0:2])
 
-        im_scale = target_im_size / float(im_size_min)
+        im_scale = target_im_size / float(im_size_max)
 
         if im_size_max * im_scale > 2000:
             im_scale = 2000 / im_size_max
