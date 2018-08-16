@@ -175,7 +175,6 @@ def train():
             checkpoint['session'] = args.session
             checkpoint['iterations'] = step
             checkpoint['model'] = model.state_dict()
-            checkpoint['optimizer'] = optimizer.state_dict()
 
             save_checkpoint(checkpoint, save_name)
             print('save model: {}'.format(save_name))
