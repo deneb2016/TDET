@@ -7,7 +7,7 @@ import torch
 
 from utils.net_utils import adjust_learning_rate, save_checkpoint, clip_gradient, calc_grad_norm
 from utils.box_utils import sample_proposals
-from model.dc_vgg16 import DC_VGG16_CLS
+from model.new_tdet import NEW_TDET
 from datasets.tdet_dataset import TDETDataset
 from matplotlib import pyplot as plt
 import torch.nn.functional as F
@@ -16,7 +16,7 @@ import math
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train')
-    parser.add_argument('--net', default='DC_VGG16', type=str)
+    parser.add_argument('--net', default='NEW_TDET', type=str)
     parser.add_argument('--start_iter', help='starting iteration', default=1, type=int)
     parser.add_argument('--max_iter', help='number of iterations', default=70000, type=int)
     parser.add_argument('--disp_interval', help='number of iterations to display loss', default=1000, type=int)
@@ -24,14 +24,22 @@ def parse_args():
     parser.add_argument('--save_dir', help='directory to save models', default="../repo/tdet")
     parser.add_argument('--data_dir', help='directory to load data', default='../data', type=str)
 
-    parser.add_argument('--bs', help='training batch size', default=10, type=int)
-    parser.add_argument('--specific_from', help='cls specific layer', default=3, type=int)
-    parser.add_argument('--specific_to', help='cls specific layer', default=4, type=int)
+    parser.add_argument('--cam_like', help='use cam-like cls score', action='store_true')
+    parser.add_argument('--pooling_method', help='roi_pooling or roi_align', default='roi_pooling', type=str)
+    parser.add_argument('--share_level', help='cls & det branch level', default=2, type=int)
+    parser.add_argument('--mil_topk', default=1, type=int)
+
+    parser.add_argument('--prop_method', help='ss, eb, or mcg', default='eb', type=str)
+    parser.add_argument('--prop_min_scale', help='minimum proposal box size', default=20, type=int)
+    parser.add_argument('--num_prop', help='maximum number of proposals to use for training', default=2000, type=int)
+
+    parser.add_argument('--alpha', help='weight for target loss', default=0.5, type=float)
+    parser.add_argument('--bs', help='source training batch size', default=128, type=int)
+    parser.add_argument('--pos_ratio', help='ratio of positive roi', default=0.25, type=float)
 
     parser.add_argument('--lr', help='starting learning rate', default=0.001, type=float)
-    parser.add_argument('--s', dest='session', help='training session', default=-1, type=int)
+    parser.add_argument('--s', dest='session', help='training session', default=0, type=int)
     parser.add_argument('--seed', help='random sed', default=1, type=int)
-    parser.add_argument('--target_only', action='store_true')
 
     # resume trained model
     parser.add_argument('--r', dest='resume', help='resume checkpoint or not', action='store_true')
@@ -58,7 +66,6 @@ def train():
     args = parse_args()
     print('Called with args:')
     print(args)
-    assert args.bs % 2 == 0
 
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -67,19 +74,21 @@ def train():
         device = torch.device('cuda')
     else:
         device = torch.device('cpu')
-    print(device)
+
     output_dir = args.save_dir
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    target_only = args.target_only
-    source_train_dataset = TDETDataset(['coco60_train2014', 'coco60_val2014'], args.data_dir, 'eb', num_classes=60)
-    target_train_dataset = TDETDataset(['voc07_trainval'], args.data_dir, 'eb', num_classes=20)
+    source_train_dataset = TDETDataset(['coco60_train2014', 'coco60_val2014'], args.data_dir, args.prop_method,
+                                       num_classes=60, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
+    target_train_dataset = TDETDataset(['voc07_trainval'], args.data_dir, args.prop_method,
+                                       num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
 
     lr = args.lr
 
-    if args.net == 'DC_VGG16':
-        model = DC_VGG16_CLS(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth') if not args.resume else None, 20 if target_only else 80, args.bs, args.specific_from, args.specific_to)
+    if args.net == 'NEW_TDET':
+        model = NEW_TDET(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth'), 20,
+                         pooling_method=args.pooling_method, share_level=args.share_level, mil_topk=args.mil_topk)
     else:
         raise Exception('network is not defined')
 
@@ -92,8 +101,9 @@ def train():
         assert args.net == checkpoint['net']
         args.start_iter = checkpoint['iterations'] + 1
         model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        lr = optimizer.param_groups[0]['lr']
         print("loaded checkpoint %s" % (load_name))
-        del checkpoint
 
     log_file_name = os.path.join(output_dir, 'log_{}_{}.txt'.format(args.net, args.session))
     if args.resume:
@@ -107,78 +117,76 @@ def train():
     model.train()
     source_loss_sum = 0
     target_loss_sum = 0
+    source_pos_prop_sum = 0
+    source_neg_prop_sum = 0
+    target_prop_sum = 0
     start = time.time()
-    source_rand_perm = None
-    target_rand_perm = None
     for step in range(args.start_iter, args.max_iter + 1):
-        if source_rand_perm is None or step % len(source_train_dataset) == 1:
+        if step % len(source_train_dataset) == 1:
             source_rand_perm = np.random.permutation(len(source_train_dataset))
-        if target_rand_perm is None or step % len(target_train_dataset) == 1:
+        if step % len(target_train_dataset) == 1:
             target_rand_perm = np.random.permutation(len(target_train_dataset))
 
         source_index = source_rand_perm[step % len(source_train_dataset)]
         target_index = target_rand_perm[step % len(target_train_dataset)]
 
-        optimizer.zero_grad()
-        if not target_only:
-            source_batch = source_train_dataset.get_data(source_index, h_flip=np.random.rand() > 0.5, target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
+        source_batch = source_train_dataset.get_data(source_index, h_flip=np.random.rand() > 0.5, target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
+        target_batch = target_train_dataset.get_data(target_index, h_flip=np.random.rand() > 0.5, target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
 
-            source_im_data = source_batch['im_data'].unsqueeze(0).to(device)
-            source_gt_labels = source_batch['gt_labels'] + 20
-            source_pos_cls = [i for i in range(80) if i in source_gt_labels]
-            source_pos_cls = np.random.choice(source_pos_cls, min(args.bs // 2, len(source_pos_cls)), replace=False)
-            source_neg_cls = [i for i in range(80) if i not in source_gt_labels]
-            source_neg_cls = np.random.choice(source_neg_cls, min(args.bs - len(source_pos_cls), len(source_neg_cls)), replace=False)
-            source_selected_cls = np.concatenate([source_pos_cls, source_neg_cls])
-            source_labels = torch.cat([torch.ones(len(source_pos_cls)), torch.zeros(len(source_neg_cls))]).to(device)
-
-            # source forward & backward
-            for i in range(0, args.bs, 2):
-                here_loss = model.forward(source_im_data, source_selected_cls[i:i + 2], source_labels[i:i+2]) / args.bs
-                here_loss.backward()
-                source_loss_sum += here_loss.item() * 2
-
-        target_batch = target_train_dataset.get_data(target_index, h_flip=np.random.rand() > 0.5,
-                                                     target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
+        source_im_data = source_batch['im_data'].unsqueeze(0).to(device)
+        source_proposals = source_batch['proposals']
+        source_gt_boxes = source_batch['gt_boxes']
+        source_proposals, source_labels, _, pos_cnt, neg_cnt = sample_proposals(source_gt_boxes, source_proposals, args.bs, args.pos_ratio)
+        source_proposals = source_proposals.to(device)
+        source_gt_boxes = source_gt_boxes.to(device)
+        source_labels = source_labels.to(device)
 
         target_im_data = target_batch['im_data'].unsqueeze(0).to(device)
-        target_gt_labels = target_batch['gt_labels']
-        target_pos_cls = [i for i in range(80) if i in target_gt_labels]
-        target_pos_cls = np.random.choice(target_pos_cls, min(args.bs // 2, len(target_pos_cls)), replace=False)
-        if target_only:
-            target_neg_cls = [i for i in range(20) if i not in target_gt_labels]
-        else:
-            target_neg_cls = [i for i in range(80) if i not in target_gt_labels]
-        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs - len(target_pos_cls), len(target_neg_cls)), replace=False)
-        target_selected_cls = np.concatenate([target_pos_cls, target_neg_cls])
-        target_labels = torch.cat([torch.ones(len(target_pos_cls)), torch.zeros(len(target_neg_cls))]).to(device)
+        target_proposals = target_batch['proposals'].to(device)
+        target_image_level_label = target_batch['image_level_label'].to(device)
 
+        optimizer.zero_grad()
+
+        # source forward & backward
+        _, source_loss = model.forward_det(source_im_data, source_proposals, source_labels)
+        source_loss_sum += source_loss.item()
+        source_loss = source_loss * (1 - args.alpha)
+        source_loss.backward()
 
         # target forward & backward
-        for i in range(0, args.bs, 2):
-            here_loss = model.forward(target_im_data, target_selected_cls[i:i + 2], target_labels[i:i+2]) * (2 / args.bs)
-            if target_only:
-                here_loss.backward()
-            else:
-                (here_loss * 0.5).backward()
-            target_loss_sum += here_loss.item()
+        if args.cam_like:
+            _, target_loss = model.forward_cls_camlike(target_im_data, target_proposals, target_image_level_label)
+        else:
+            _, target_loss = model.forward_cls(target_im_data, target_proposals, target_image_level_label)
+        target_loss_sum += target_loss.item()
+        target_loss = target_loss * args.alpha
+        target_loss.backward()
 
         clip_gradient(model, 10.0)
         optimizer.step()
+        source_pos_prop_sum += pos_cnt
+        source_neg_prop_sum += neg_cnt
+        target_prop_sum += target_proposals.size(0)
 
         if step % args.disp_interval == 0:
             end = time.time()
-            loss_sum = source_loss_sum * 0.5 + target_loss_sum * 0.5
+            loss_sum = source_loss_sum * (1 - args.alpha) + target_loss_sum * args.alpha
             loss_sum /= args.disp_interval
             source_loss_sum /= args.disp_interval
             target_loss_sum /= args.disp_interval
-            log_message = "[%s][session %d][iter %4d] loss: %.4f, src_loss: %.4f, tar_loss: %.4f, lr: %.2e, time: %.1f" % \
-                          (args.net, args.session, step, loss_sum, source_loss_sum, target_loss_sum, lr, end - start)
+            source_pos_prop_sum /= args.disp_interval
+            source_neg_prop_sum /= args.disp_interval
+            target_prop_sum /= args.disp_interval
+            log_message = "[%s][session %d][iter %4d] loss: %.4f, src_loss: %.4f, tar_loss: %.4f, pos_prop: %.1f, neg_prop: %.1f, tar_prop: %.1f, lr: %.2e, time: %.1f" % \
+                          (args.net, args.session, step, loss_sum, source_loss_sum, target_loss_sum, source_pos_prop_sum, source_neg_prop_sum, target_prop_sum, lr, end - start)
             print(log_message)
             log_file.write(log_message + '\n')
             log_file.flush()
             source_loss_sum = 0
             target_loss_sum = 0
+            source_pos_prop_sum = 0
+            source_neg_prop_sum = 0
+            target_prop_sum = 0
             start = time.time()
 
         if step in (args.max_iter * 4 // 7, args.max_iter * 6 // 7):
@@ -190,8 +198,14 @@ def train():
             checkpoint = dict()
             checkpoint['net'] = args.net
             checkpoint['session'] = args.session
+            checkpoint['cls_specific'] = args.cls_specific
+            checkpoint['pooling_method'] = args.pooling_method
+            checkpoint['share_level'] = args.share_level
+            checkpoint['det_softmax'] = args.det_softmax
+            checkpoint['det_choice'] = args.det_choice
             checkpoint['iterations'] = step
             checkpoint['model'] = model.state_dict()
+            checkpoint['optimizer'] = optimizer.state_dict()
 
             save_checkpoint(checkpoint, save_name)
             print('save model: {}'.format(save_name))

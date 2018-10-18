@@ -7,7 +7,7 @@ import torch
 
 from utils.net_utils import adjust_learning_rate, save_checkpoint, clip_gradient, calc_grad_norm
 from utils.box_utils import sample_proposals
-from model.dc_vgg16 import DC_VGG16_CLS
+from model.attentive_det_vgg16 import AttentiveDetGlobal
 from datasets.tdet_dataset import TDETDataset
 from matplotlib import pyplot as plt
 import torch.nn.functional as F
@@ -16,7 +16,7 @@ import math
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train')
-    parser.add_argument('--net', default='DC_VGG16', type=str)
+    parser.add_argument('--net', default='ATT_DET', type=str)
     parser.add_argument('--start_iter', help='starting iteration', default=1, type=int)
     parser.add_argument('--max_iter', help='number of iterations', default=70000, type=int)
     parser.add_argument('--disp_interval', help='number of iterations to display loss', default=1000, type=int)
@@ -25,13 +25,15 @@ def parse_args():
     parser.add_argument('--data_dir', help='directory to load data', default='../data', type=str)
 
     parser.add_argument('--bs', help='training batch size', default=10, type=int)
-    parser.add_argument('--specific_from', help='cls specific layer', default=3, type=int)
-    parser.add_argument('--specific_to', help='cls specific layer', default=4, type=int)
 
     parser.add_argument('--lr', help='starting learning rate', default=0.001, type=float)
     parser.add_argument('--s', dest='session', help='training session', default=-1, type=int)
     parser.add_argument('--seed', help='random sed', default=1, type=int)
     parser.add_argument('--target_only', action='store_true')
+
+    parser.add_argument('--im_size', help='im_size', default=640, type=int)
+    parser.add_argument('--hidden_dim', help='hidden layer dim for attention', default=1024, type=int)
+
 
     # resume trained model
     parser.add_argument('--r', dest='resume', help='resume checkpoint or not', action='store_true')
@@ -78,8 +80,8 @@ def train():
 
     lr = args.lr
 
-    if args.net == 'DC_VGG16':
-        model = DC_VGG16_CLS(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth') if not args.resume else None, 20 if target_only else 80, args.bs, args.specific_from, args.specific_to)
+    if args.net == 'ATT_DET':
+        model = AttentiveDetGlobal(os.path.join(args.data_dir, 'pretrained_model/vgg16_caffe.pth') if not args.resume else None, 20 if target_only else 80, args.hidden_dim, args.im_size)
     else:
         raise Exception('network is not defined')
 
@@ -107,6 +109,7 @@ def train():
     model.train()
     source_loss_sum = 0
     target_loss_sum = 0
+    total_loss_sum = 0
     start = time.time()
     source_rand_perm = None
     target_rand_perm = None
@@ -121,62 +124,46 @@ def train():
 
         optimizer.zero_grad()
         if not target_only:
-            source_batch = source_train_dataset.get_data(source_index, h_flip=np.random.rand() > 0.5, target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
+            source_batch = source_train_dataset.get_data(source_index, h_flip=np.random.rand() > 0.5, target_im_size=args.im_size, square_img=True)
 
             source_im_data = source_batch['im_data'].unsqueeze(0).to(device)
             source_gt_labels = source_batch['gt_labels'] + 20
             source_pos_cls = [i for i in range(80) if i in source_gt_labels]
-            source_pos_cls = np.random.choice(source_pos_cls, min(args.bs // 2, len(source_pos_cls)), replace=False)
-            source_neg_cls = [i for i in range(80) if i not in source_gt_labels]
-            source_neg_cls = np.random.choice(source_neg_cls, min(args.bs - len(source_pos_cls), len(source_neg_cls)), replace=False)
-            source_selected_cls = np.concatenate([source_pos_cls, source_neg_cls])
-            source_labels = torch.cat([torch.ones(len(source_pos_cls)), torch.zeros(len(source_neg_cls))]).to(device)
+            source_pos_cls = torch.tensor(np.random.choice(source_pos_cls, min(args.bs, len(source_pos_cls)), replace=False), dtype=torch.long, device=device)
 
-            # source forward & backward
-            for i in range(0, args.bs, 2):
-                here_loss = model.forward(source_im_data, source_selected_cls[i:i + 2], source_labels[i:i+2]) / args.bs
-                here_loss.backward()
-                source_loss_sum += here_loss.item() * 2
+            _, source_loss = model(source_im_data, source_pos_cls)
+            source_loss_sum += source_loss.item()
 
         target_batch = target_train_dataset.get_data(target_index, h_flip=np.random.rand() > 0.5,
-                                                     target_im_size=np.random.choice([480, 576, 688, 864, 1200]))
+                                                     target_im_size=args.im_size, square_img=True)
 
         target_im_data = target_batch['im_data'].unsqueeze(0).to(device)
         target_gt_labels = target_batch['gt_labels']
         target_pos_cls = [i for i in range(80) if i in target_gt_labels]
-        target_pos_cls = np.random.choice(target_pos_cls, min(args.bs // 2, len(target_pos_cls)), replace=False)
-        if target_only:
-            target_neg_cls = [i for i in range(20) if i not in target_gt_labels]
+        target_pos_cls = torch.tensor(np.random.choice(target_pos_cls, min(args.bs, len(target_pos_cls)), replace=False), dtype=torch.long, device=device)
+
+        _, target_loss, _ = model(target_im_data, target_pos_cls)
+        target_loss_sum += target_loss.item()
+        if args.target_only:
+            total_loss = target_loss
         else:
-            target_neg_cls = [i for i in range(80) if i not in target_gt_labels]
-        target_neg_cls = np.random.choice(target_neg_cls, min(args.bs - len(target_pos_cls), len(target_neg_cls)), replace=False)
-        target_selected_cls = np.concatenate([target_pos_cls, target_neg_cls])
-        target_labels = torch.cat([torch.ones(len(target_pos_cls)), torch.zeros(len(target_neg_cls))]).to(device)
-
-
-        # target forward & backward
-        for i in range(0, args.bs, 2):
-            here_loss = model.forward(target_im_data, target_selected_cls[i:i + 2], target_labels[i:i+2]) * (2 / args.bs)
-            if target_only:
-                here_loss.backward()
-            else:
-                (here_loss * 0.5).backward()
-            target_loss_sum += here_loss.item()
-
+            total_loss = (source_loss + target_loss) * 0.5
+        total_loss.backward()
+        total_loss_sum += total_loss.item()
         clip_gradient(model, 10.0)
         optimizer.step()
 
         if step % args.disp_interval == 0:
             end = time.time()
-            loss_sum = source_loss_sum * 0.5 + target_loss_sum * 0.5
-            loss_sum /= args.disp_interval
+            total_loss_sum /= args.disp_interval
             source_loss_sum /= args.disp_interval
             target_loss_sum /= args.disp_interval
-            log_message = "[%s][session %d][iter %4d] loss: %.4f, src_loss: %.4f, tar_loss: %.4f, lr: %.2e, time: %.1f" % \
-                          (args.net, args.session, step, loss_sum, source_loss_sum, target_loss_sum, lr, end - start)
+            log_message = "[%s][session %d][iter %4d] loss: %.8f, src_loss: %.8f, tar_loss: %.8f, lr: %.2e, time: %.1f" % \
+                          (args.net, args.session, step, total_loss_sum, source_loss_sum, target_loss_sum, lr, end - start)
             print(log_message)
             log_file.write(log_message + '\n')
             log_file.flush()
+            total_loss_sum = 0
             source_loss_sum = 0
             target_loss_sum = 0
             start = time.time()

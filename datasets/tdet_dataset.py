@@ -47,7 +47,7 @@ class TDETDataset(data.Dataset):
         order = order[:min(self.prop_topk, order.shape[0])]
         return proposals[order], scores[order]
 
-    def get_data(self, index, h_flip=False, target_im_size=688):
+    def get_data(self, index, h_flip=False, target_im_size=688, square_img=False):
         im, gt_boxes, gt_categories, proposals, prop_scores, id, loader_index = self.get_raw_data(index)
         raw_img = im.copy()
         proposals, prop_scores = self.select_proposals(proposals, prop_scores)
@@ -78,14 +78,23 @@ class TDETDataset(data.Dataset):
         im_size_min = np.min(im_shape[0:2])
         im_size_max = np.max(im_shape[0:2])
 
-        im_scale = target_im_size / float(im_size_max)
+        if square_img:
+            x_scale = target_im_size / im_shape[1]
+            y_scale = target_im_size / im_shape[0]
+            im = cv2.resize(im, None, None, fx=x_scale, fy=y_scale, interpolation=cv2.INTER_LINEAR)
 
-        if im_size_max * im_scale > 2000:
-            im_scale = 2000 / im_size_max
-        im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
+            gt_boxes = gt_boxes * np.array([x_scale, y_scale, x_scale, y_scale])
+            proposals = proposals * np.array([x_scale, y_scale, x_scale, y_scale])
+            im_scale = [x_scale, y_scale]
+        else:
+            im_scale = target_im_size / float(im_size_max)
 
-        gt_boxes = gt_boxes * im_scale
-        proposals = proposals * im_scale
+            if im_size_max * im_scale > 2000:
+                im_scale = 2000 / im_size_max
+            im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale, interpolation=cv2.INTER_LINEAR)
+
+            gt_boxes = gt_boxes * im_scale
+            proposals = proposals * im_scale
 
         # to tensor
         data = torch.tensor(im, dtype=torch.float32)
