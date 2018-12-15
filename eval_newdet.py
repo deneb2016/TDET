@@ -5,7 +5,7 @@ import time
 
 import torch
 
-from model.tdet_vgg16 import TDET_VGG16
+from model.new_tdet import NEW_TDET
 from datasets.tdet_dataset import TDETDataset
 from matplotlib import pyplot as plt
 import torch.nn.functional as F
@@ -33,7 +33,12 @@ def parse_args():
     return args
 
 args = parse_args()
-
+VOC_CLASSES = [
+    'aeroplane', 'bicycle', 'bird', 'boat',
+    'bottle', 'bus', 'car', 'cat', 'chair',
+    'cow', 'diningtable', 'dog', 'horse',
+    'motorbike', 'person', 'pottedplant',
+    'sheep', 'sofa', 'train', 'tvmonitor']
 def draw_box(boxes, col=None):
     for j, (xmin, ymin, xmax, ymax) in enumerate(boxes):
         if col is None:
@@ -60,17 +65,14 @@ def eval():
 
     eval_kit = voc_eval_kit('test', '2007', os.path.join(args.data_dir, 'VOCdevkit2007'))
 
-    test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
+    test_dataset = TDETDataset(['voc07_trainval'], args.data_dir, args.prop_method,
                                num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
 
     load_name = os.path.join(args.save_dir, 'tdet', '{}.pth'.format(args.model_name))
     print("loading checkpoint %s" % (load_name))
     checkpoint = torch.load(load_name)
-    if checkpoint['net'] == 'TDET_VGG16':
-        model = TDET_VGG16(None, 20, pooling_method=checkpoint['pooling_method'],
-                           cls_specific_det=checkpoint['cls_specific'] if checkpoint['cls_specific'] is not False else 'no', share_level=checkpoint['share_level'],
-                           det_softmax=checkpoint['det_softmax'] if 'det_softmax' in checkpoint else 'no',
-                           det_choice=checkpoint['det_choice'] if 'det_choice' in checkpoint else 1)
+    if checkpoint['net'] == 'NEW_TDET':
+        model = NEW_TDET(None, 20, pooling_method=checkpoint['pooling_method'], share_level=checkpoint['share_level'])
     else:
         raise Exception('network is not defined')
     model.load_state_dict(checkpoint['model'])
@@ -131,13 +133,35 @@ def eval():
         boxes = test_dataset.get_raw_proposal(index)
 
         for cls in range(20):
+            if cls != 10:
+                continue
+
+            if test_batch['image_level_label'][cls] > 0 and cls == 10:
+                print(VOC_CLASSES[cls])
+                plt.imshow(test_batch['raw_img'])
+
+                c_sorted_indices = np.argsort(-c_scores[:, cls])
+                d_sorted_indices = np.argsort(-d_scores[:, 0])
+                mul_sorted_indices = np.argsort(-(c_scores[:, cls] * d_scores[:, 0]))
+                sum_sorted_indices = np.argsort(-(c_scores[:, cls] + d_scores[:, 0]))
+
+                print(c_scores[c_sorted_indices[:10], cls])
+                #print(d_scores[d_sorted_indices[:5], 0])
+
+                plt.imshow(test_batch['raw_img'])
+                draw_box(boxes[c_sorted_indices[:3]], 'red')
+                draw_box(boxes[c_sorted_indices[3:6]], 'green')
+                draw_box(boxes[c_sorted_indices[6:9]], 'blue')
+
+                # draw_box(boxes[d_sorted_indices[:5]], 'green')
+               # draw_box(boxes[sum_sorted_indices[:3]], 'yellow')
+                #draw_box(boxes[mul_sorted_indices[:3]], 'blue')
+                plt.show()
+
             inds = np.where((scores[:, cls] > thresh[cls]))[0]
             cls_scores = scores[inds, cls]
             cls_c_scores = c_scores[inds, cls]
-            if checkpoint['cls_specific']:
-                cls_d_scores = d_scores[inds, cls]
-            else:
-                cls_d_scores = d_scores[inds, 0]
+            cls_d_scores = d_scores[inds, 0]
             cls_boxes = boxes[inds].copy()
 
             top_inds = np.argsort(-cls_scores)[:max_per_image]
@@ -145,6 +169,7 @@ def eval():
             cls_c_scores = cls_c_scores[top_inds]
             cls_d_scores = cls_d_scores[top_inds]
             cls_boxes = cls_boxes[top_inds, :]
+
 
             # if cls_scores[0] > 10:
             #     print(cls)
@@ -229,24 +254,32 @@ def show():
         save_name = os.path.join(args.save_dir, 'detection_result', '{}.pkl'.format(args.model_name))
 
     saved_data = pickle.load(open(save_name, 'rb'), encoding='latin1')
+    all_boxes = saved_data['all_boxes']
+    cls_scores = saved_data['cls']
+    det_scores = saved_data['det']
 
-    if type(saved_data) == list:
-        all_boxes = saved_data
-    else:
-        all_boxes = saved_data['all_boxes']
-        cls_scores = saved_data['cls']
-        det_scores = saved_data['det']
-
-    for cls in range(10, 20):
+    for cls in range(15, 20):
         for index in range(len(all_boxes[0])):
             dets = all_boxes[cls][index]
             if dets == [] or len(dets) == 0:
                 continue
-            keep = nms(dets, 0.3)
-            all_boxes[cls][index] = dets[keep, :].copy()
+            #keep = nms(dets, 0.3)
+            #all_boxes[cls][index] = dets[keep, :].copy()
+            #c_s = cls_scores[cls][index][keep]
+            #d_s = det_scores[cls][index][keep]
+
+            c_sorted_indices = np.argsort(cls_scores[cls][index])
+            d_sorted_indices = np.argsort(det_scores[cls][index])
+            mul_sorted_indices = np.argsort(cls_scores[cls][index] * det_scores[cls][index])
+
+            print(cls)
+            print(all_boxes[cls][index][:10, 4])
+            print(c_s[:10])
+            print(d_s[:10])
 
             if all_boxes[cls][index][0, 4] > 10:
                 plt.imshow(test_dataset.get_raw_img(index))
+
                 draw_box(all_boxes[cls][index][0:1, :4], 'black')
                 draw_box(all_boxes[cls][index][1:2, :4], 'red')
                 draw_box(all_boxes[cls][index][2:3, :4], 'green')
@@ -255,6 +288,6 @@ def show():
                 plt.show()
 
 if __name__ == '__main__':
-    #eval()
+    eval()
     #eval_saved_result()
-    show()
+    #show()

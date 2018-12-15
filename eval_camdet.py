@@ -75,7 +75,7 @@ def show():
     print("loaded checkpoint %s" % (load_name))
 
     print(model.label_weights)
-    test_dataset = TDETDataset(['voc07_test'], args.data_dir, args.prop_method,
+    test_dataset = TDETDataset(['voc07_trainval'], args.data_dir, args.prop_method,
                                num_classes=20, prop_min_scale=args.prop_min_scale, prop_topk=args.num_prop)
 
     for data_idx in range(len(test_dataset)):
@@ -86,15 +86,19 @@ def show():
         pos_cls = [i for i in range(80) if i in gt_labels]
         pos_cls = torch.tensor(pos_cls, dtype=torch.long, device=device)
 
-        if len(pos_cls) < 2:
+        if 10 not in pos_cls:
             continue
+
         print(pos_cls)
         loss, score, attention, dist = model(im_data, pos_cls)
         for i, cls in enumerate(pos_cls):
+            if cls != 10:
+                continue
             print(score)
             print(VOC_CLASSES[cls])
             print(score[cls])
 
+            attention[cls] = attention[cls] /
             maxi = attention[cls].max()
             print(maxi)
 

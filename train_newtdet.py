@@ -198,11 +198,8 @@ def train():
             checkpoint = dict()
             checkpoint['net'] = args.net
             checkpoint['session'] = args.session
-            checkpoint['cls_specific'] = args.cls_specific
             checkpoint['pooling_method'] = args.pooling_method
             checkpoint['share_level'] = args.share_level
-            checkpoint['det_softmax'] = args.det_softmax
-            checkpoint['det_choice'] = args.det_choice
             checkpoint['iterations'] = step
             checkpoint['model'] = model.state_dict()
             checkpoint['optimizer'] = optimizer.state_dict()
